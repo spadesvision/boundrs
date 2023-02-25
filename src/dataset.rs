@@ -369,12 +369,13 @@ impl<L: Label> Datapoint<L> {
     }
 }
 
-#[derive(Clone, Copy, PartialEq)]
-pub enum DatasetMovement<'c, L: Label> {
+#[derive(Clone, PartialEq)]
+pub enum DatasetMovement<L: Label> {
     Next,
     Previous,
-    NextContaining(&'c HashSet<L>),
-    PreviousContaining(&'c HashSet<L>),
+    NextContaining(HashSet<L>),
+    PreviousContaining(HashSet<L>),
+    JumpTo(usize),
 }
 
 pub struct Dataset<L: Label> {
@@ -410,7 +411,7 @@ impl<L: Label> Dataset<L> {
         let mut dataset = Dataset::from_input_dir()?;
         for mut datapoint in &mut dataset.data {
             let label_name = datapoint.label_src.file_name().unwrap().to_str().unwrap();
-            let label_prefix_name = format!("{}{}", prefix, label_name);
+            let label_prefix_name = format!("{prefix}{label_name}");
             datapoint.label_src = datapoint.label_src.with_file_name(label_prefix_name);
         }
         Ok(dataset)
@@ -431,6 +432,9 @@ impl<L: Label> Dataset<L> {
     }
     pub fn get_progress(&self) -> (usize, usize, usize) {
         (0, self.i, self.data.len())
+    }
+    pub fn get_mut_progress(&mut self) -> (usize, &mut usize, usize) {
+        (0, &mut self.i, self.data.len())
     }
     fn save_label(&self, label: YoloLabel<L>) -> Result<()> {
         self.data[self.i].save_label(label)
@@ -463,14 +467,19 @@ impl<L: Label> Dataset<L> {
         }
         Ok(())
     }
+    fn go_to(&mut self, pos: usize) -> Result<()> {
+        self.i = pos.clamp(0, self.data.len() - 1);
+        Ok(())
+    }
 
     pub fn go(&mut self, movement: DatasetMovement<L>, label: YoloLabel<L>) -> Result<()> {
         self.save_label(label)?;
         match movement {
             DatasetMovement::Next => self.next(),
             DatasetMovement::Previous => self.previous(),
-            DatasetMovement::NextContaining(classes) => self.next_containing(classes),
-            DatasetMovement::PreviousContaining(classes) => self.previous_containing(classes),
+            DatasetMovement::NextContaining(classes) => self.next_containing(&classes),
+            DatasetMovement::PreviousContaining(classes) => self.previous_containing(&classes),
+            DatasetMovement::JumpTo(pos) => self.go_to(pos),
         }
     }
 }

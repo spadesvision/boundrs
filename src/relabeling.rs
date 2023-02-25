@@ -157,7 +157,8 @@ impl Relabeling {
             _ => return,
         };
 
-        self.go(move_old, move_new, ctx);
+        // TODO this is not good code...
+        self.go(move_old.clone(), move_new, ctx);
         if move_old == DatasetMovement::Next && self.new_label.is_empty() {
             self.repeat_bbs().unwrap();
         }

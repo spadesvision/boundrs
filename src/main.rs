@@ -288,10 +288,14 @@ impl Boundrs {
         let movement = match (next_pressed, previous_pressed, self.filter) {
             (true, false, false) => DatasetMovement::Next,
             (false, true, false) => DatasetMovement::Previous,
-            (true, false, true) => DatasetMovement::NextContaining(&self.shown_classes),
-            (false, true, true) => DatasetMovement::PreviousContaining(&self.shown_classes),
+            (true, false, true) => DatasetMovement::NextContaining(self.shown_classes.clone()),
+            (false, true, true) => DatasetMovement::PreviousContaining(self.shown_classes.clone()),
             _ => return,
         };
+        self.dataset_move(movement, ctx);
+    }
+
+    fn dataset_move(&mut self, movement: DatasetMovement<Card>, ctx: &Context) {
         self.dataset
             .go(movement, self.current_label.clone())
             .unwrap();
@@ -318,6 +322,12 @@ impl eframe::App for Boundrs {
                         .text(format!("{current} out of {max} images")),
                 );
             });
+            ui.add(DragValue::from_get_set(|new_pos| {
+                if let Some(new_pos) = new_pos {
+                    self.dataset_move(DatasetMovement::JumpTo(new_pos as usize), ctx);
+                }
+                self.dataset.get_progress().1 as f64
+            }));
             ui.horizontal(|ui| {
                 ui.label("Filter opacity");
                 ui.add(Slider::new(&mut self.filter_opacity, 0..=255));
