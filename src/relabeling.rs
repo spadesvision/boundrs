@@ -239,6 +239,16 @@ impl eframe::App for Relabeling {
                         .text(format!("{current} out of {max} images")),
                 );
             });
+            ui.add(DragValue::from_get_set(|new_pos| {
+                if let Some(new_pos) = new_pos {
+                    self.go(
+                        DatasetMovement::JumpTo(new_pos as usize),
+                        DatasetMovement::JumpTo(new_pos as usize),
+                        ctx,
+                    );
+                }
+                self.old_dataset.get_progress().1 as f64
+            }));
         });
         egui::CentralPanel::default()
             .frame(egui::Frame::none().fill(Color32::BLACK))
