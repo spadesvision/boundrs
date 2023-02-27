@@ -276,13 +276,13 @@ impl<L: Label> YoloBB<L> {
 pub trait BoundingBox<L: Label> {
     fn rect(&self, size: Vec2) -> Rect;
     fn class(&self) -> L;
-    fn from_rect(rect: Rect, size: Vec2, class: L) -> Self;
+    fn from_rect(rect: Rect, size: Rect, class: L) -> Self;
 }
 
 impl<L: Label> BoundingBox<L> for YoloBB<L> {
     fn rect(&self, size: Vec2) -> Rect {
-        let img_w = size.x as f32;
-        let img_h = size.y as f32;
+        let img_w = size.x;
+        let img_h = size.y;
         let yl = self;
         Rect::from_center_size(
             [yl.x * img_w, yl.y * img_h].into(),
@@ -292,20 +292,22 @@ impl<L: Label> BoundingBox<L> for YoloBB<L> {
     fn class(&self) -> L {
         L::from_usize(self.class_num)
     }
-    fn from_rect(rect: Rect, size: Vec2, class: L) -> Self {
-        let img_w = size.x as f32;
-        let img_h = size.y as f32;
+    fn from_rect(rect: Rect, img_rect: Rect, class: L) -> Self {
+        let img_size = img_rect.size();
+        let img_w = img_size.x;
+        let img_h = img_size.y;
         let center = rect.center();
-        let x = center.x as f32 / img_w;
-        let y = center.y as f32 / img_h;
+        let rect = rect.intersect(img_rect);
+        let x = center.x / img_w;
+        let y = center.y / img_h;
         let size = rect.size();
-        let w = size.x as f32 / img_w;
-        let h = size.y as f32 / img_h;
+        let w = size.x / img_w;
+        let h = size.y / img_h;
         let class_num = class.to_usize();
         YoloBB {
             class_num,
-            x,
-            y,
+            x: x.clamp(0.0, 1.0),
+            y: y.clamp(0.0, 1.0),
             w,
             h,
             label: PhantomData::default(),

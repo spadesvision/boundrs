@@ -186,7 +186,7 @@ impl Relabeling {
             let old_bbx = self.old_label[highlighted];
             let card = old_bbx.class();
             let new_class = CardSuit(card, suit);
-            let new_bbs = BoundingBox::from_rect(old_bbx.rect(size), size, new_class);
+            let new_bbs = BoundingBox::from_rect(old_bbx.rect(size), self.image_rect, new_class);
             self.new_label.push(new_bbs);
             self.highlighted = self.find_next_highlighted();
             if self.new_label.len() == self.old_label.len() && self.highlighted.is_none() {
@@ -207,7 +207,8 @@ impl Relabeling {
                 let union = old_rect.union(new_rect).area();
                 let iou = intersect / union;
                 if iou > 0.95 {
-                    let new_label = BoundingBox::from_rect(old_rect, size, new_bbs.class());
+                    let new_label =
+                        BoundingBox::from_rect(old_rect, self.image_rect, new_bbs.class());
                     self.new_label.push(new_label)
                 }
             }

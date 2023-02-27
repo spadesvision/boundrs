@@ -5,7 +5,7 @@ use egui::*;
 use std::collections::HashSet;
 
 mod dataset;
-use dataset::{BoundingBox, Card, Dataset, DatasetMovement, Label, YoloBB, YoloLabel};
+use dataset::{BoundingBox, Card, CardSuit, Dataset, DatasetMovement, Label, YoloBB, YoloLabel};
 use image::{Rgba, RgbaImage};
 
 mod relabeling;
@@ -48,6 +48,31 @@ enum BBoxInput {
     Finished(Pos2, Pos2),
 }
 
+struct Relabel {
+    highlighted: Option<usize>,
+    old_dataset: Dataset<Card>,
+    new_dataset: Dataset<CardSuit>,
+    old_label: YoloLabel<Card>,
+    new_label: YoloLabel<CardSuit>,
+}
+
+impl Relabel {
+    fn new() -> Self {
+        let old_dataset = Dataset::from_input_dir().unwrap();
+        let new_dataset = Dataset::with_label_prefix("new_").unwrap();
+        let old_label = old_dataset.current_label().unwrap();
+        let new_label = new_dataset.current_label().unwrap();
+        let highlighted = None;
+        Self {
+            highlighted,
+            old_dataset,
+            new_dataset,
+            old_label,
+            new_label,
+        }
+    }
+}
+
 struct Boundrs {
     image_texture: egui::TextureHandle,
     mask_texture: egui::TextureHandle,
@@ -59,6 +84,7 @@ struct Boundrs {
     filter_opacity: u8,
     shown_classes: HashSet<Card>,
     current_label: YoloLabel<Card>,
+    relabel: Relabel,
 }
 
 impl Boundrs {
@@ -89,6 +115,7 @@ impl Boundrs {
             filter_opacity,
             shown_classes,
             current_label: current_bbs,
+            relabel: Relabel::new(),
         })
     }
 }
@@ -179,12 +206,16 @@ impl Boundrs {
             BBoxInput::Partial(pos1) => BBoxInput::Partial(pos1),
             BBoxInput::Finished(pos1, pos2) => {
                 let class = self.current_class;
-                let label = YoloBB::from_rect(
-                    Rect::from_two_pos(pos1, pos2),
-                    self.image_texture.size_vec2(),
-                    class,
-                );
-                println!("{:?}", label);
+                let top_left = Pos2 { x: 0.0, y: 0.0 };
+                let [w, h] = self.image_texture.size();
+                let bot_right = Pos2 {
+                    x: w as f32,
+                    y: h as f32,
+                };
+                let img_rect = Rect::from_two_pos(top_left, bot_right);
+                let label_rect = Rect::from_two_pos(pos1, pos2);
+                let label = YoloBB::from_rect(label_rect, img_rect, class);
+                println!("{label:?}");
                 self.add_bb(label);
                 self.update_mask(ui.ctx());
                 BBoxInput::None
