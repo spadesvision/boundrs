@@ -8,7 +8,7 @@ use std::marker::PhantomData;
 use std::path::PathBuf;
 use std::str::FromStr;
 
-pub trait Label
+pub trait DatasetLabel
 where
     Self: std::fmt::Debug + Clone + Copy + PartialEq + Eq + std::hash::Hash,
 {
@@ -37,7 +37,7 @@ pub enum Card {
     V3,
     V2,
 }
-impl Label for Card {
+impl DatasetLabel for Card {
     fn color(self) -> Color32 {
         use Card::*;
         match self {
@@ -141,7 +141,7 @@ pub enum Suit {
     Spades,
 }
 
-impl Label for Suit {
+impl DatasetLabel for Suit {
     fn color(self) -> Color32 {
         use Suit::*;
         match self {
@@ -195,7 +195,7 @@ impl Label for Suit {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct CardSuit(pub Card, pub Suit);
 
-impl Label for CardSuit {
+impl DatasetLabel for CardSuit {
     fn color(self) -> Color32 {
         self.0.color()
     }
@@ -235,7 +235,7 @@ impl Label for CardSuit {
 pub type YoloLabel<L> = Vec<YoloBB<L>>;
 
 #[derive(Debug, Clone, Copy)]
-pub struct YoloBB<L: Label> {
+pub struct YoloBB<L: DatasetLabel> {
     class_num: usize,
     x: f32,
     y: f32,
@@ -244,7 +244,7 @@ pub struct YoloBB<L: Label> {
     label: PhantomData<L>,
 }
 
-impl<L: Label> FromStr for YoloBB<L> {
+impl<L: DatasetLabel> FromStr for YoloBB<L> {
     type Err = Error;
 
     fn from_str(s: &str) -> Result<Self> {
@@ -263,7 +263,7 @@ impl<L: Label> FromStr for YoloBB<L> {
     }
 }
 
-impl<L: Label> YoloBB<L> {
+impl<L: DatasetLabel> YoloBB<L> {
     fn as_string(self) -> String {
         format!(
             "{} {} {} {} {}",
@@ -272,14 +272,14 @@ impl<L: Label> YoloBB<L> {
     }
 }
 
-pub trait BoundingBox<L: Label> {
+pub trait BoundingBox<L: DatasetLabel> {
     // fn rect(&self, size: Vec2) -> Rect;
     fn to_screen_rect(&self, rect: Rect) -> Rect;
     fn class(&self) -> L;
     fn from_rect(rect: Rect, size: Rect, class: L) -> Self;
 }
 
-impl<L: Label> BoundingBox<L> for YoloBB<L> {
+impl<L: DatasetLabel> BoundingBox<L> for YoloBB<L> {
     // fn rect(&self, size: Vec2) -> Rect {
     //     let img_w = size.x;
     //     let img_h = size.y;
@@ -327,7 +327,7 @@ impl<L: Label> BoundingBox<L> for YoloBB<L> {
 }
 
 #[derive(Debug)]
-struct Datapoint<L: Label> {
+struct Datapoint<L: DatasetLabel> {
     img_src: PathBuf,
     label_src: PathBuf,
     label: PhantomData<L>,
@@ -341,7 +341,7 @@ fn load_image_from_path(path: &std::path::Path) -> Result<ColorImage> {
     Ok(ColorImage::from_rgba_unmultiplied(size, pixels.as_slice()))
 }
 
-impl<L: Label> Datapoint<L> {
+impl<L: DatasetLabel> Datapoint<L> {
     fn new(img_src: PathBuf, labels_dir: PathBuf) -> Self {
         let img_filename = img_src.file_name().unwrap();
         let mut label_src = labels_dir;
@@ -383,7 +383,7 @@ impl<L: Label> Datapoint<L> {
 }
 
 #[derive(Clone, PartialEq)]
-pub enum DatasetMovement<L: Label> {
+pub enum DatasetMovement<L: DatasetLabel> {
     Next,
     Previous,
     NextContaining(HashSet<L>),
@@ -391,12 +391,12 @@ pub enum DatasetMovement<L: Label> {
     JumpTo(usize),
 }
 
-pub struct Dataset<L: Label> {
+pub struct Dataset<L: DatasetLabel> {
     data: Vec<Datapoint<L>>,
     i: usize,
 }
 
-impl<L: Label> Dataset<L> {
+impl<L: DatasetLabel> Dataset<L> {
     pub fn from_input_dir() -> Result<Self> {
         let mut data = vec![];
         let labels_dir = PathBuf::from("./input");

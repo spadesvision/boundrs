@@ -4,7 +4,7 @@ use egui::*;
 use std::collections::HashSet;
 
 use crate::dataset::{
-    BoundingBox, Card, CardSuit, Dataset, DatasetMovement, Label, Suit, YoloLabel,
+    BoundingBox, Card, CardSuit, Dataset, DatasetLabel, DatasetMovement, Suit, YoloLabel,
 };
 // use image::{Rgba, RgbaImage};
 
@@ -65,7 +65,20 @@ impl Relabeling {
                     .text(format!("{current} out of {max} images")),
             );
         });
-        ui.label("Shortcuts: ...");
+        ui.vertical(|ui| {
+            ui.separator();
+            ui.label(RichText::new("How to use").heading());
+            ui.label(RichText::new(
+                "The highlighted box is ready to be remapped with these keybindings:",
+            ));
+            ui.label(RichText::new("D: Diamond"));
+            ui.label(RichText::new("H: Heart"));
+            ui.label(RichText::new("S: Spades"));
+            ui.label(RichText::new("C: Clubs"));
+            ui.label(RichText::new("Clear (mapped) labels: Delete"));
+            ui.label(RichText::new("Repeat previous labels: R"));
+            ui.label(RichText::new("Go left or right: Left Arrow or Right Arrow"));
+        });
     }
     pub fn draw_img(&mut self, ui: &mut Ui) {
         let img_response = ui.add(
@@ -74,7 +87,7 @@ impl Relabeling {
         );
         self.img_rect = img_response.rect;
     }
-    pub fn draw_label_text<L: Label>(&self, painter: &Painter, text_pos: Pos2, class: L) {
+    pub fn draw_label_text<L: DatasetLabel>(&self, painter: &Painter, text_pos: Pos2, class: L) {
         painter.rect(
             Rect::from_two_pos(text_pos, text_pos + [40.0, -35.0].into()),
             Rounding::none(),

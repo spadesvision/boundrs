@@ -4,7 +4,7 @@ use egui::*;
 use std::collections::HashSet;
 
 mod dataset;
-use dataset::{BoundingBox, Card, Dataset, DatasetMovement, Label, YoloBB, YoloLabel};
+use dataset::{BoundingBox, Card, Dataset, DatasetLabel, DatasetMovement, YoloBB, YoloLabel};
 use image::{Rgba, RgbaImage};
 
 mod relabeling;
@@ -100,6 +100,24 @@ impl Labeling {
         ui.horizontal(|ui| {
             ui.label("Shown classes:");
             ui.label(format!("{:?}", self.shown_classes));
+        });
+        ui.vertical(|ui| {
+            ui.separator();
+            ui.label(RichText::new("How to use").heading());
+            ui.label(RichText::new("Choos the active label with:"));
+            ui.label(RichText::new("1: Ace"));
+            ui.label(RichText::new("2: 2"));
+            ui.label(RichText::new("..."));
+            ui.label(RichText::new("0: 10"));
+            ui.label(RichText::new("J: J"));
+            ui.label(RichText::new("Q: Q"));
+            ui.label(RichText::new("K: K"));
+            ui.label(RichText::new("Create label by clicking twice or dragging"));
+            ui.label(RichText::new("Delete labels with a right click"));
+            ui.label(RichText::new("Repeat previous labels: R"));
+            ui.label(RichText::new(
+                "Go left and right: Left Arrow or A and Right Arrow or D",
+            ));
         });
     }
     pub fn draw_img(&mut self, ui: &mut Ui) -> Response {
@@ -331,6 +349,7 @@ impl eframe::App for Boundrs {
                 ui.selectable_value(&mut self.mode, Mode::Label, "Label");
                 ui.selectable_value(&mut self.mode, Mode::Relabel, "Relabel");
             });
+            ui.separator();
 
             match self.mode {
                 Mode::Label => self.label.draw_ui(ui, ctx),
@@ -338,7 +357,7 @@ impl eframe::App for Boundrs {
             }
         });
         egui::CentralPanel::default()
-            .frame(egui::Frame::none().fill(Color32::BLACK).inner_margin(100.0))
+            .frame(egui::Frame::none().fill(Color32::BLACK))
             .show(ctx, |ui| {
                 // Draw image
 
