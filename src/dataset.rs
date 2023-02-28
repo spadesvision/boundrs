@@ -220,7 +220,6 @@ impl Label for CardSuit {
         let card = Card::from_usize(card_usize);
         CardSuit(card, suit)
     }
-    // TODO fucking unit test generically
     fn to_usize(self) -> usize {
         let (card, suit) = (self.0, self.1);
         let card_usize = card.to_usize();
@@ -275,6 +274,7 @@ impl<L: Label> YoloBB<L> {
 
 pub trait BoundingBox<L: Label> {
     fn rect(&self, size: Vec2) -> Rect;
+    fn to_screen_rect(&self, rect: Rect) -> Rect;
     fn class(&self) -> L;
     fn from_rect(rect: Rect, size: Rect, class: L) -> Self;
 }
@@ -289,15 +289,19 @@ impl<L: Label> BoundingBox<L> for YoloBB<L> {
             [yl.w * img_w, yl.h * img_h].into(),
         )
     }
+    fn to_screen_rect(&self, rect: Rect) -> Rect {
+        self.rect(rect.size()).translate(rect.left_top().to_vec2())
+    }
     fn class(&self) -> L {
         L::from_usize(self.class_num)
     }
     fn from_rect(rect: Rect, img_rect: Rect, class: L) -> Self {
+        let rect = rect.intersect(img_rect);
+        let rect = rect.translate(-img_rect.left_top().to_vec2());
         let img_size = img_rect.size();
         let img_w = img_size.x;
         let img_h = img_size.y;
         let center = rect.center();
-        let rect = rect.intersect(img_rect);
         let x = center.x / img_w;
         let y = center.y / img_h;
         let size = rect.size();
@@ -434,9 +438,6 @@ impl<L: Label> Dataset<L> {
     }
     pub fn get_progress(&self) -> (usize, usize, usize) {
         (0, self.i, self.data.len())
-    }
-    pub fn get_mut_progress(&mut self) -> (usize, &mut usize, usize) {
-        (0, &mut self.i, self.data.len())
     }
     fn save_label(&self, label: YoloLabel<L>) -> Result<()> {
         self.data[self.i].save_label(label)
