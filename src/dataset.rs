@@ -273,24 +273,31 @@ impl<L: Label> YoloBB<L> {
 }
 
 pub trait BoundingBox<L: Label> {
-    fn rect(&self, size: Vec2) -> Rect;
+    // fn rect(&self, size: Vec2) -> Rect;
     fn to_screen_rect(&self, rect: Rect) -> Rect;
     fn class(&self) -> L;
     fn from_rect(rect: Rect, size: Rect, class: L) -> Self;
 }
 
 impl<L: Label> BoundingBox<L> for YoloBB<L> {
-    fn rect(&self, size: Vec2) -> Rect {
-        let img_w = size.x;
-        let img_h = size.y;
+    // fn rect(&self, size: Vec2) -> Rect {
+    //     let img_w = size.x;
+    //     let img_h = size.y;
+    //     let yl = self;
+    //     Rect::from_center_size(
+    //         [yl.x * img_w, yl.y * img_h].into(),
+    //         [yl.w * img_w, yl.h * img_h].into(),
+    //     )
+    // }
+    fn to_screen_rect(&self, img_rect: Rect) -> Rect {
+        let img_w = img_rect.size().x;
+        let img_h = img_rect.size().y;
         let yl = self;
-        Rect::from_center_size(
+        let rect = Rect::from_center_size(
             [yl.x * img_w, yl.y * img_h].into(),
             [yl.w * img_w, yl.h * img_h].into(),
-        )
-    }
-    fn to_screen_rect(&self, rect: Rect) -> Rect {
-        self.rect(rect.size()).translate(rect.left_top().to_vec2())
+        );
+        rect.translate(img_rect.left_top().to_vec2())
     }
     fn class(&self) -> L {
         L::from_usize(self.class_num)

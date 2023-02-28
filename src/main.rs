@@ -56,9 +56,8 @@ impl Labeling {
         let dataset = Dataset::from_input_dir().unwrap();
         let image = dataset.current_image().unwrap();
         let image_texture = cc.load_texture("my-image", image, egui::TextureOptions::LINEAR);
-        let size = image_texture.size_vec2();
         let current_bbs = dataset.current_label().unwrap();
-        let mask = generate_mask(&current_bbs, &shown_classes, size, 250);
+        let mask = generate_mask(&current_bbs, &shown_classes, Rect::NOTHING, 250);
         let mask_texture = cc.load_texture("mask", mask, egui::TextureOptions::LINEAR);
         Labeling {
             dataset,
@@ -120,16 +119,15 @@ impl Labeling {
             let mask = generate_mask(
                 &self.current_label,
                 &self.shown_classes,
-                self.img_rect.size(),
+                self.img_rect,
                 self.filter_opacity,
             );
             self.mask_texture = ctx.load_texture("mask", mask, egui::TextureOptions::LINEAR);
         }
     }
     pub fn remove_labels(&mut self, pos: Pos2, img_rect: Rect) {
-        let size = img_rect.size();
         self.current_label
-            .retain(|label| !label.rect(size).contains(pos));
+            .retain(|label| !label.to_screen_rect(img_rect).contains(pos));
     }
     pub fn add_bb(&mut self, bb: YoloBB<Card>) {
         self.current_label.push(bb)
@@ -294,13 +292,16 @@ impl Boundrs {
     }
 }
 
-fn pos_inside_label_box(label: &YoloLabel<Card>, pos: Pos2, size: Vec2) -> bool {
-    label.iter().any(|l| l.rect(size).contains(pos))
+#[inline]
+fn pos_inside_label_box(label: &YoloLabel<Card>, pos: Pos2, img_rect: Rect) -> bool {
+    label
+        .iter()
+        .any(|l| l.to_screen_rect(img_rect).contains(pos))
 }
 fn generate_mask(
     label: &YoloLabel<Card>,
     shown_classes: &HashSet<Card>,
-    size: Vec2,
+    img_rect: Rect,
     opacity: u8,
 ) -> ColorImage {
     let highlighted_label = label
@@ -308,11 +309,12 @@ fn generate_mask(
         .cloned()
         .filter(|bb| shown_classes.contains(&bb.class()))
         .collect();
-    let width = size.x as usize;
-    let height = size.y as usize;
+    let width = img_rect.width() as usize;
+    let height = img_rect.height() as usize;
+    let img_rect = img_rect.translate(-img_rect.left_top().to_vec2());
     let mask = RgbaImage::from_fn(width as u32, height as u32, |x, y| {
         let pos = Pos2::new(x as f32, y as f32);
-        if pos_inside_label_box(&highlighted_label, pos, size) {
+        if pos_inside_label_box(&highlighted_label, pos, img_rect) {
             Rgba([0, 0, 0, 0])
         } else {
             Rgba([0, 0, 0, opacity])
@@ -336,7 +338,7 @@ impl eframe::App for Boundrs {
             }
         });
         egui::CentralPanel::default()
-            .frame(egui::Frame::none().fill(Color32::BLACK))
+            .frame(egui::Frame::none().fill(Color32::BLACK).inner_margin(100.0))
             .show(ctx, |ui| {
                 // Draw image
 

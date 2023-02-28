@@ -74,9 +74,6 @@ impl Relabeling {
         );
         self.img_rect = img_response.rect;
     }
-    pub fn rect_img_to_screen(&self, rect: Rect) -> Rect {
-        rect.translate(self.img_rect.left_top().to_vec2())
-    }
     pub fn draw_label_text<L: Label>(&self, painter: &Painter, text_pos: Pos2, class: L) {
         painter.rect(
             Rect::from_two_pos(text_pos, text_pos + [40.0, -35.0].into()),
@@ -94,28 +91,27 @@ impl Relabeling {
     }
     pub fn draw_bbs(&self, ui: &mut Ui) {
         let painter = ui.painter();
-        let size = self.img_rect.size();
         for bb in self.old_label.iter() {
             let color = bb.class().color();
-            let screen_rect = self.rect_img_to_screen(bb.rect(size));
+            let screen_rect = bb.to_screen_rect(self.img_rect);
             painter.rect_stroke(screen_rect, Rounding::none(), Stroke::new(2.0, color));
             let text_pos = screen_rect.left_bottom();
             self.draw_label_text(painter, text_pos, bb.class());
         }
         for bb in self.new_label.iter() {
             let color = bb.class().color();
-            let screen_rect = self.rect_img_to_screen(bb.rect(size));
+            let screen_rect = bb.to_screen_rect(self.img_rect);
             painter.rect_stroke(screen_rect, Rounding::none(), Stroke::new(2.0, color));
             let text_pos = screen_rect.left_top();
             self.draw_label_text(painter, text_pos, bb.class());
         }
     }
     pub fn find_next_highlighted(&self) -> Option<usize> {
-        let size = self.img_rect.size();
+        // let size = self.img_rect.size();
         for (i, old_bbs) in self.old_label.iter().enumerate() {
             if self.new_label.iter().all(|new_bbs| {
-                let old_rect = old_bbs.rect(size);
-                let new_rect = new_bbs.rect(size);
+                let old_rect = old_bbs.to_screen_rect(self.img_rect);
+                let new_rect = new_bbs.to_screen_rect(self.img_rect);
                 let iou = old_rect.intersect(new_rect).area() / old_rect.union(new_rect).area();
                 iou < 0.95
             }) {
@@ -127,8 +123,7 @@ impl Relabeling {
     pub fn draw_highlight(&self, ui: &mut Ui) {
         if let Some(highlighted) = self.highlighted {
             let bb = &self.old_label[highlighted];
-            let size = self.img_rect.size();
-            let screen_rect = self.rect_img_to_screen(bb.rect(size));
+            let screen_rect = bb.to_screen_rect(self.img_rect);
             ui.painter().rect_stroke(
                 screen_rect,
                 Rounding::none(),
@@ -200,11 +195,14 @@ impl Relabeling {
     pub fn handle_class_keys(&mut self, ctx: &Context) {
         let suits = self.classes_pressed(ctx);
         if let (Some(suit), Some(highlighted)) = (suits.into_iter().next(), self.highlighted) {
-            let size = self.img_rect.size();
             let old_bbx = self.old_label[highlighted];
             let card = old_bbx.class();
             let new_class = CardSuit(card, suit);
-            let new_bbs = BoundingBox::from_rect(old_bbx.rect(size), self.img_rect, new_class);
+            let new_bbs = BoundingBox::from_rect(
+                old_bbx.to_screen_rect(self.img_rect),
+                self.img_rect,
+                new_class,
+            );
             self.new_label.push(new_bbs);
             self.highlighted = self.find_next_highlighted();
             if self.new_label.len() == self.old_label.len() && self.highlighted.is_none() {
@@ -215,12 +213,11 @@ impl Relabeling {
         }
     }
     pub fn take_similar_bbs(&mut self, new_label_candidate: YoloLabel<CardSuit>) {
-        let size = self.img_rect.size();
         self.new_label = vec![];
         for old_bbs in self.old_label.iter() {
             for new_bbs in new_label_candidate.iter() {
-                let old_rect = old_bbs.rect(size);
-                let new_rect = new_bbs.rect(size);
+                let old_rect = old_bbs.to_screen_rect(self.img_rect);
+                let new_rect = new_bbs.to_screen_rect(self.img_rect);
                 let intersect = old_rect.intersect(new_rect).area();
                 let union = old_rect.union(new_rect).area();
                 let iou = intersect / union;
