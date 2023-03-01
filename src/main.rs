@@ -4,7 +4,7 @@ use egui::*;
 use std::collections::HashSet;
 
 mod dataset;
-use dataset::{BoundingBox, Card, Dataset, DatasetLabel, DatasetMovement, YoloBB, YoloLabel};
+use dataset::{BoundingBox, Dataset, DatasetLabel, DatasetMovement, DynLabel, YoloBB, YoloLabel};
 use image::{Rgba, RgbaImage};
 
 mod relabeling;
@@ -38,16 +38,16 @@ enum BBoxInput {
 }
 
 struct Labeling {
-    dataset: Dataset<Card>,
+    dataset: Dataset<DynLabel>,
     image_texture: egui::TextureHandle,
     mask_texture: egui::TextureHandle,
     img_rect: Rect,
     bbox_input: BBoxInput,
-    current_class: Card,
+    current_class: DynLabel,
     filter: bool,
     filter_opacity: u8,
-    shown_classes: HashSet<Card>,
-    current_label: YoloLabel<Card>,
+    shown_classes: HashSet<DynLabel>,
+    current_label: YoloLabel<DynLabel>,
 }
 
 impl Labeling {
@@ -65,7 +65,7 @@ impl Labeling {
             mask_texture,
             img_rect: Rect::NOTHING,
             bbox_input: BBoxInput::None,
-            current_class: Card::V2,
+            current_class: DynLabel(0),
             filter: false,
             filter_opacity: 250,
             shown_classes: HashSet::new(),
@@ -147,7 +147,7 @@ impl Labeling {
         self.current_label
             .retain(|label| !label.to_screen_rect(img_rect).contains(pos));
     }
-    pub fn add_bb(&mut self, bb: YoloBB<Card>) {
+    pub fn add_bb(&mut self, bb: YoloBB<DynLabel>) {
         self.current_label.push(bb)
     }
 
@@ -187,7 +187,7 @@ impl Labeling {
             self.draw_guide(ui, pos);
         }
     }
-    fn draw_label_text(&self, painter: &Painter, text_pos: Pos2, class: Card) {
+    fn draw_label_text(&self, painter: &Painter, text_pos: Pos2, class: DynLabel) {
         painter.rect(
             Rect::from_two_pos(text_pos, text_pos + [40.0, -35.0].into()),
             Rounding::none(),
@@ -241,27 +241,21 @@ impl Labeling {
             }
         };
     }
-    fn classes_pressed(&self, ctx: &Context) -> HashSet<Card> {
-        let mut classes = HashSet::new();
-        for (keys, class) in Card::shortcuts() {
-            if keys.iter().all(|key| ctx.input(|i| i.key_pressed(*key))) {
-                classes.insert(class);
-            }
-        }
-        classes
+    fn class_pressed(&self, ctx: &Context) -> Option<DynLabel> {
+        ctx.input(|i| DynLabel::keys_to_class(i.keys_down.clone()))
     }
 
     fn handle_class_keys(&mut self, ctx: &Context) {
-        let classes = self.classes_pressed(ctx);
-        if self.filter {
-            self.shown_classes = self
-                .shown_classes
-                .symmetric_difference(&classes)
-                .copied()
-                .collect();
-            self.update_mask(ctx);
-        } else if let Some(class) = classes.into_iter().next() {
-            self.current_class = class;
+        if let Some(class) = self.class_pressed(ctx) {
+            if self.filter {
+                if self.shown_classes.contains(&class) {
+                    self.shown_classes.remove(&class);
+                } else {
+                    self.shown_classes.insert(class);
+                }
+            } else {
+                self.current_class = class;
+            }
         }
     }
     fn handle_left_right(&mut self, ctx: &Context) {
@@ -280,7 +274,7 @@ impl Labeling {
         self.dataset_move(movement, ctx);
     }
 
-    fn dataset_move(&mut self, movement: DatasetMovement<Card>, ctx: &Context) {
+    fn dataset_move(&mut self, movement: DatasetMovement<DynLabel>, ctx: &Context) {
         self.dataset
             .go(movement, self.current_label.clone())
             .unwrap();
@@ -311,14 +305,14 @@ impl Boundrs {
 }
 
 #[inline]
-fn pos_inside_label_box(label: &YoloLabel<Card>, pos: Pos2, img_rect: Rect) -> bool {
+fn pos_inside_label_box(label: &YoloLabel<DynLabel>, pos: Pos2, img_rect: Rect) -> bool {
     label
         .iter()
         .any(|l| l.to_screen_rect(img_rect).contains(pos))
 }
 fn generate_mask(
-    label: &YoloLabel<Card>,
-    shown_classes: &HashSet<Card>,
+    label: &YoloLabel<DynLabel>,
+    shown_classes: &HashSet<DynLabel>,
     img_rect: Rect,
     opacity: u8,
 ) -> ColorImage {

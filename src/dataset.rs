@@ -1,24 +1,101 @@
 use crate::egui::*;
 use anyhow::{Error, Result};
 use glob::glob;
-use std::collections::{HashMap, HashSet};
+use lazy_static::lazy_static;
+use serde::Deserialize;
+// use serde::Deserialize;
+// use serde::Serialize;
+// use serde_json;
+use std::collections::HashSet;
 use std::fs::File;
 use std::io::prelude::*;
 use std::marker::PhantomData;
 use std::path::PathBuf;
 use std::str::FromStr;
 
+lazy_static! {
+    static ref CONFIG_STR: String = std::fs::read_to_string("labels.toml").unwrap();
+    static ref DYN_CONFIG: DynLabelConfig = toml::from_str(&CONFIG_STR).unwrap();
+    // static ref DYN_SHORTCUTS: HashMap<Vec<Key>, DynLabel> = DYN_CONFIG.clone().into_shortcuts();
+}
+
+#[derive(Deserialize, Clone)]
+pub struct DynLabelConfig {
+    labels: Vec<DynLabelSpec>,
+}
+
+#[derive(Deserialize, Clone)]
+pub struct DynLabelSpec {
+    keys: HashSet<Key>,
+    name: String,
+}
+
 pub trait DatasetLabel
 where
     Self: std::fmt::Debug + Clone + Copy + PartialEq + Eq + std::hash::Hash,
 {
     fn color(self) -> Color32;
-    fn shortcuts() -> HashMap<Vec<Key>, Self>
-    where
-        Self: Sized;
+    fn keys_to_class(keys: HashSet<Key>) -> Option<Self> {
+        keys.into_iter()
+            .filter_map(|key| Self::key_to_class(key))
+            .next()
+    }
+    fn key_to_class(key: Key) -> Option<Self>;
     fn from_usize(i: usize) -> Self;
     fn to_usize(self) -> usize;
     fn to_name(self) -> String;
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct DynLabel(pub usize);
+
+impl DatasetLabel for DynLabel {
+    fn color(self) -> Color32 {
+        match self.0 % 13 {
+            0 => Color32::from_rgb(0x2f, 0x4f, 0x4f),
+            1 => Color32::from_rgb(0x8b, 0x45, 0x13),
+            2 => Color32::from_rgb(0x00, 0x80, 0x00),
+            3 => Color32::from_rgb(0x4b, 0x00, 0x82),
+            4 => Color32::from_rgb(0xff, 0x00, 0x00),
+            5 => Color32::from_rgb(0xff, 0xff, 0x00),
+            6 => Color32::from_rgb(0x00, 0xff, 0x00),
+            7 => Color32::from_rgb(0x00, 0xff, 0xff),
+            8 => Color32::from_rgb(0x00, 0x00, 0xff),
+            9 => Color32::from_rgb(0xff, 0x00, 0xff),
+            10 => Color32::from_rgb(0x64, 0x95, 0xed),
+            11 => Color32::from_rgb(0xff, 0xda, 0xb9),
+            12 => Color32::from_rgb(0xff, 0x69, 0xb6),
+            _ => unreachable!(),
+        }
+    }
+    fn keys_to_class(keys: HashSet<Key>) -> Option<Self> {
+        DYN_CONFIG
+            .labels
+            .iter()
+            .enumerate()
+            .filter(|(_i, spec)| spec.keys == keys)
+            .map(|(i, _)| DynLabel(i))
+            .next()
+    }
+    fn from_usize(i: usize) -> Self {
+        DynLabel(i)
+    }
+    fn to_usize(self) -> usize {
+        self.0
+    }
+    fn to_name(self) -> String {
+        DYN_CONFIG.labels[self.0].name.clone()
+    }
+
+    fn key_to_class(key: Key) -> Option<Self> {
+        DYN_CONFIG
+            .labels
+            .iter()
+            .enumerate()
+            .filter(|(_i, spec)| spec.keys.contains(&key))
+            .map(|(i, _)| DynLabel(i))
+            .next()
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -57,22 +134,46 @@ impl DatasetLabel for Card {
         }
     }
 
-    fn shortcuts() -> HashMap<Vec<Key>, Card> {
-        let mut map = HashMap::new();
-        map.insert(vec![Key::Num1], Card::A);
-        map.insert(vec![Key::Num2], Card::V2);
-        map.insert(vec![Key::Num3], Card::V3);
-        map.insert(vec![Key::Num4], Card::V4);
-        map.insert(vec![Key::Num5], Card::V5);
-        map.insert(vec![Key::Num6], Card::V6);
-        map.insert(vec![Key::Num7], Card::V7);
-        map.insert(vec![Key::Num8], Card::V8);
-        map.insert(vec![Key::Num9], Card::V9);
-        map.insert(vec![Key::Num0], Card::V10);
-        map.insert(vec![Key::J], Card::J);
-        map.insert(vec![Key::Q], Card::Q);
-        map.insert(vec![Key::K], Card::K);
-        map
+    fn key_to_class(key: Key) -> Option<Self> {
+        match key {
+            Key::Num1 => Some(Card::A),
+            Key::Num2 => Some(Card::V2),
+            Key::Num3 => Some(Card::V3),
+            Key::Num4 => Some(Card::V4),
+            Key::Num5 => Some(Card::V5),
+            Key::Num6 => Some(Card::V6),
+            Key::Num7 => Some(Card::V7),
+            Key::Num8 => Some(Card::V8),
+            Key::Num9 => Some(Card::V9),
+            Key::Num0 => Some(Card::V10),
+            Key::J => Some(Card::J),
+            Key::Q => Some(Card::Q),
+            Key::K => Some(Card::K),
+            _ => None,
+        }
+    }
+
+    fn keys_to_class(keys: HashSet<Key>) -> Option<Self> {
+        if let Some(key) = keys.into_iter().next() {
+            match key {
+                Key::Num1 => Some(Card::A),
+                Key::Num2 => Some(Card::V2),
+                Key::Num3 => Some(Card::V3),
+                Key::Num4 => Some(Card::V4),
+                Key::Num5 => Some(Card::V5),
+                Key::Num6 => Some(Card::V6),
+                Key::Num7 => Some(Card::V7),
+                Key::Num8 => Some(Card::V8),
+                Key::Num9 => Some(Card::V9),
+                Key::Num0 => Some(Card::V10),
+                Key::J => Some(Card::J),
+                Key::Q => Some(Card::Q),
+                Key::K => Some(Card::K),
+                _ => None,
+            }
+        } else {
+            None
+        }
     }
 
     fn from_usize(i: usize) -> Card {
@@ -152,14 +253,15 @@ impl DatasetLabel for Suit {
         }
     }
 
-    fn shortcuts() -> HashMap<Vec<Key>, Suit> {
+    fn key_to_class(key: Key) -> Option<Self> {
         use Suit::*;
-        let mut map = HashMap::new();
-        map.insert(vec![Key::H], Hearts);
-        map.insert(vec![Key::D], Diamonds);
-        map.insert(vec![Key::C], Clubs);
-        map.insert(vec![Key::S], Spades);
-        map
+        match key {
+            Key::H => Some(Hearts),
+            Key::D => Some(Diamonds),
+            Key::C => Some(Clubs),
+            Key::S => Some(Spades),
+            _ => None,
+        }
     }
     fn from_usize(i: usize) -> Suit {
         use Suit::*;
@@ -199,18 +301,11 @@ impl DatasetLabel for CardSuit {
     fn color(self) -> Color32 {
         self.0.color()
     }
-    fn shortcuts() -> HashMap<Vec<Key>, CardSuit> {
-        let card_shortcuts = Card::shortcuts();
-        let suit_shortcuts = Suit::shortcuts();
-        let mut shortcuts = HashMap::new();
-        for (cs, card) in card_shortcuts.iter() {
-            for (ss, suit) in suit_shortcuts.iter() {
-                let mut shortcut = ss.clone();
-                shortcut.append(&mut cs.clone());
-                shortcuts.insert(shortcut, CardSuit(*card, *suit));
-            }
-        }
-        shortcuts
+    fn key_to_class(_key: Key) -> Option<Self> {
+        None
+    }
+    fn keys_to_class(_keys: HashSet<Key>) -> Option<Self> {
+        None
     }
     fn from_usize(i: usize) -> CardSuit {
         // println!("CardSuit from usize {i}");

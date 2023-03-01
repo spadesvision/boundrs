@@ -1,7 +1,6 @@
 use anyhow::Result;
 use eframe::egui;
 use egui::*;
-use std::collections::HashSet;
 
 use crate::dataset::{
     BoundingBox, Card, CardSuit, Dataset, DatasetLabel, DatasetMovement, Suit, YoloLabel,
@@ -196,18 +195,12 @@ impl Relabeling {
         }
         self.highlighted = self.find_next_highlighted();
     }
-    pub fn classes_pressed(&self, ctx: &Context) -> HashSet<Suit> {
-        let mut classes = HashSet::new();
-        for (keys, class) in Suit::shortcuts() {
-            if keys.iter().all(|key| ctx.input(|i| i.key_pressed(*key))) {
-                classes.insert(class);
-            }
-        }
-        classes
+    fn new_class_pressed(&self, ctx: &Context) -> Option<Suit> {
+        ctx.input(|i| Suit::keys_to_class(i.keys_down.clone()))
     }
+
     pub fn handle_class_keys(&mut self, ctx: &Context) {
-        let suits = self.classes_pressed(ctx);
-        if let (Some(suit), Some(highlighted)) = (suits.into_iter().next(), self.highlighted) {
+        if let (Some(suit), Some(highlighted)) = (self.new_class_pressed(ctx), self.highlighted) {
             let old_bbx = self.old_label[highlighted];
             let card = old_bbx.class();
             let new_class = CardSuit(card, suit);
