@@ -196,7 +196,15 @@ impl Relabeling {
         self.highlighted = self.find_next_highlighted();
     }
     fn new_class_pressed(&self, ctx: &Context) -> Option<Suit> {
-        ctx.input(|i| Suit::keys_to_class(i.keys_down.clone()))
+        ctx.input(|i| {
+            Suit::keys_to_class(
+                i.keys_down
+                    .clone()
+                    .into_iter()
+                    .filter(|key| i.key_pressed(*key))
+                    .collect(),
+            )
+        })
     }
 
     pub fn handle_class_keys(&mut self, ctx: &Context) {
