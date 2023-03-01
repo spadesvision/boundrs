@@ -1,5 +1,5 @@
 use crate::egui::*;
-use anyhow::{Error, Result};
+use anyhow::{anyhow, Error, Result};
 use glob::glob;
 use lazy_static::lazy_static;
 use serde::Deserialize;
@@ -14,8 +14,8 @@ use std::path::PathBuf;
 use std::str::FromStr;
 
 lazy_static! {
-    static ref CONFIG_STR: String = std::fs::read_to_string("labels.toml").unwrap();
-    static ref DYN_CONFIG: DynLabelConfig = toml::from_str(&CONFIG_STR).unwrap();
+    static ref CONFIG_STR: String = std::fs::read_to_string("labels.toml").expect("labels.toml file should exist");
+    static ref DYN_CONFIG: DynLabelConfig = toml::from_str(&CONFIG_STR).expect("labels.toml should contain a table called labels with columns keys and name");
     // static ref DYN_SHORTCUTS: HashMap<Vec<Key>, DynLabel> = DYN_CONFIG.clone().into_shortcuts();
 }
 
@@ -438,7 +438,9 @@ fn load_image_from_path(path: &std::path::Path) -> Result<ColorImage> {
 
 impl<L: DatasetLabel> Datapoint<L> {
     fn new(img_src: PathBuf, labels_dir: PathBuf) -> Self {
-        let img_filename = img_src.file_name().unwrap();
+        let img_filename = img_src
+            .file_name()
+            .expect(".jpg extension should be a file");
         let mut label_src = labels_dir;
         label_src.push(img_filename);
         label_src.set_extension("txt");
@@ -453,7 +455,7 @@ impl<L: DatasetLabel> Datapoint<L> {
     }
     fn load_label(&self) -> Result<YoloLabel<L>> {
         if !self.label_src.exists() {
-            File::create(&self.label_src).unwrap();
+            File::create(&self.label_src).expect("File creation should not fail");
         }
         let yolo_strs = std::fs::read_to_string(&self.label_src)?;
 
@@ -473,7 +475,12 @@ impl<L: DatasetLabel> Datapoint<L> {
         Ok(())
     }
     fn name(&self) -> String {
-        self.img_src.file_name().unwrap().to_str().unwrap().into()
+        self.img_src
+            .file_name()
+            .expect(".jpg path should be a file")
+            .to_str()
+            .expect(".jpg filename can be made to a string")
+            .into()
     }
 }
 
@@ -495,20 +502,21 @@ impl<L: DatasetLabel> Dataset<L> {
     pub fn from_input_dir() -> Result<Self> {
         let mut data = vec![];
         let labels_dir = PathBuf::from("./input");
-        let mut paths: Vec<_> = glob("./input/*.jpg")?.map(|p| p.unwrap()).collect();
+        let mut paths: Vec<_> = glob("./input/*.jpg")?.filter_map(Result::ok).collect();
         alphanumeric_sort::sort_path_slice(&mut paths);
         for img_src in paths.into_iter() {
             data.push(Datapoint::new(img_src, labels_dir.clone()))
+        }
+        if data.is_empty() {
+            return Err(anyhow!(
+                "Dataset is empty. You need to put .jpg files in ./input/"
+            ));
         }
         // start at first imgage without labels
         let first_no_label = data
             .iter()
             .position(|p| !p.label_src.is_file())
             .unwrap_or(0);
-        println!(
-            "Starting at index {first_no_label} with label {:?}",
-            data[first_no_label]
-        );
 
         Ok(Dataset {
             data,
@@ -518,7 +526,12 @@ impl<L: DatasetLabel> Dataset<L> {
     pub fn with_label_prefix(prefix: &str) -> Result<Self> {
         let mut dataset = Dataset::from_input_dir()?;
         for mut datapoint in &mut dataset.data {
-            let label_name = datapoint.label_src.file_name().unwrap().to_str().unwrap();
+            let label_name = datapoint
+                .label_src
+                .file_name()
+                .expect(".txt path should be a file")
+                .to_str()
+                .expect(".txt filename should be a &str");
             let label_prefix_name = format!("{prefix}{label_name}");
             datapoint.label_src = datapoint.label_src.with_file_name(label_prefix_name);
         }
