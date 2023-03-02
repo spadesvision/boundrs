@@ -3,19 +3,19 @@ use eframe::egui;
 use egui::*;
 
 use crate::dataset::{
-    BoundingBox, Card, CardSuit, Dataset, DatasetLabel, DatasetMovement, Suit, YoloLabel,
+    BoundingBox, Card, CardSuit, Dataset, DatasetLabel, DatasetMovement, DynLabel, Suit, YoloLabel,
 };
 // use image::{Rgba, RgbaImage};
 
 pub struct Relabeling {
     // index of currently editing label in old_label
-    highlighted: Option<usize>,
+    pub highlighted: Option<usize>,
     zoom: f32,
     image_texture: egui::TextureHandle,
     img_rect: Rect,
-    old_dataset: Dataset<Card>,
+    pub old_dataset: Dataset<DynLabel>,
     new_dataset: Dataset<CardSuit>,
-    old_label: YoloLabel<Card>,
+    pub old_label: YoloLabel<DynLabel>,
     new_label: YoloLabel<CardSuit>,
 }
 
@@ -85,7 +85,7 @@ impl Relabeling {
             ui.label(RichText::new("Go left or right: Left Arrow or Right Arrow"));
         });
     }
-    pub fn draw_img(&mut self, ui: &mut Ui) {
+    pub fn draw_img(&mut self, ui: &mut Ui) -> Response {
         let img_response = ui.add(
             egui::Image::new(
                 &self.image_texture,
@@ -94,6 +94,7 @@ impl Relabeling {
             .sense(Sense::click_and_drag()),
         );
         self.img_rect = img_response.rect;
+        img_response
     }
     pub fn draw_label_text<L: DatasetLabel>(&self, painter: &Painter, text_pos: Pos2, class: L) {
         painter.rect(
@@ -158,7 +159,7 @@ impl Relabeling {
     }
     pub fn go(
         &mut self,
-        move_old: DatasetMovement<Card>,
+        move_old: DatasetMovement<DynLabel>,
         move_new: DatasetMovement<CardSuit>,
         ctx: &Context,
     ) {
@@ -219,7 +220,8 @@ impl Relabeling {
     pub fn handle_class_keys(&mut self, ctx: &Context) {
         if let (Some(suit), Some(highlighted)) = (self.new_class_pressed(ctx), self.highlighted) {
             let old_bbx = self.old_label[highlighted];
-            let card = old_bbx.class();
+            let class = old_bbx.class();
+            let card = Card::from_usize(class.0);
             let new_class = CardSuit(card, suit);
             let new_bbs = BoundingBox::from_rect(
                 old_bbx.to_screen_rect(self.img_rect),
@@ -258,63 +260,21 @@ impl Relabeling {
         self.highlighted = self.find_next_highlighted();
         Ok(())
     }
-}
-
-impl eframe::App for Relabeling {
-    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        egui::Window::new("Boundrs Labeling").show(ctx, |ui| {
-            let filename = self.old_dataset.current_name();
-            ui.horizontal(|ui| {
-                ui.label("Current image:");
-                ui.label(filename);
-            });
-            ui.horizontal(|ui| {
-                ui.label("Progress");
-                let (_, current, max) = self.old_dataset.get_progress();
-                ui.add(
-                    ProgressBar::new(current as f32 / max as f32)
-                        .show_percentage()
-                        .text(format!("{current} out of {max} images")),
-                );
-            });
-            ui.add(DragValue::from_get_set(|new_pos| {
-                if let Some(new_pos) = new_pos {
-                    self.go(
-                        DatasetMovement::JumpTo(new_pos as usize),
-                        DatasetMovement::JumpTo(new_pos as usize),
-                        ctx,
-                    );
-                }
-                self.old_dataset.get_progress().1 as f64
-            }));
-        });
-        egui::CentralPanel::default()
-            .frame(egui::Frame::none().fill(Color32::BLACK))
-            .show(ctx, |ui| {
-                // Draw image
-                let img_response = ui.add(
-                    egui::Image::new(&self.image_texture, self.image_texture.size_vec2())
-                        .sense(Sense::click_and_drag()),
-                );
-                self.img_rect = img_response.rect;
-
-                // Draw bbs
-                self.draw_bbs(ui);
-                self.draw_highlight(ui);
-
-                // Handle prev next picture keyboard
-                self.handle_left_right(ctx);
-
-                // Handle class setting
-                self.handle_class_keys(ctx);
-
-                // Handle labels clearing
-                self.handle_clear(ctx);
-
-                // Handle repeat button
-                if ctx.input(|i| i.key_pressed(egui::Key::R)) {
-                    self.repeat_bbs().unwrap();
-                }
-            });
+    pub fn remove_labels(&mut self, pos: Pos2, img_rect: Rect) {
+        self.old_label
+            .retain(|label| !label.to_screen_rect(img_rect).contains(pos));
+        self.new_label
+            .retain(|label| !label.to_screen_rect(img_rect).contains(pos));
+        self.highlighted = self.find_next_highlighted();
+    }
+    fn remove_bbs(&mut self, pos: Pos2, img_rect: Rect) {
+        self.remove_labels(pos, img_rect);
+    }
+    pub fn handle_img_response(&mut self, img_response: Response, _ui: &mut Ui) {
+        if img_response.secondary_clicked() {
+            println!("secondary clicked");
+            let screen_pos = img_response.interact_pointer_pos().unwrap();
+            self.remove_bbs(screen_pos, img_response.rect);
+        }
     }
 }

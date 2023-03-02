@@ -319,19 +319,30 @@ impl Boundrs {
     fn handle_mode_switch(&mut self, ctx: &Context) {
         // We save the current label and update the state in the new mode
         if ctx.input(|i| i.key_pressed(Key::Tab)) {
+            // TODO this desperately needs to be refactored. Maybe label and relabel as tools (not owning their datatsets), instead of apps
             self.mode = match self.mode {
                 Mode::Label => {
                     let (_, current_pos, _) = self.label.dataset.get_progress();
                     let label_move = DatasetMovement::JumpTo(current_pos);
-                    self.label.dataset_move(label_move, ctx);
                     let relabel_old_move = DatasetMovement::JumpTo(current_pos);
                     let relabel_new_move = DatasetMovement::JumpTo(current_pos);
-                    self.relabel.go(relabel_old_move, relabel_new_move, ctx);
-                    // self.relabel.old_label = self.label.current_label;
+                    self.relabel.go(relabel_old_move, relabel_new_move, ctx); // move relabel dataset
+
+                    self.label.dataset_move(label_move, ctx); // This saves currentl label to disk
+                    self.relabel.old_label = self.label.current_label.clone(); // override relabels old_label
+                    self.relabel.highlighted = self.relabel.find_next_highlighted(); // If we removed the highlighted, it would crash if we dont update this... refactor
                     Mode::Relabel
                 }
                 Mode::Relabel => {
                     // let (_, current_pos, _) = self.relabel.old_dataset.get_progress();
+                    let (_, current_pos, _) = self.relabel.old_dataset.get_progress();
+                    let label_move = DatasetMovement::JumpTo(current_pos);
+                    let relabel_old_move = DatasetMovement::JumpTo(current_pos);
+                    let relabel_new_move = DatasetMovement::JumpTo(current_pos);
+                    self.label.dataset_move(label_move, ctx); // move label dataset
+                    self.relabel.go(relabel_old_move, relabel_new_move, ctx); // save relabels old_label and new_label
+
+                    self.label.current_label = self.relabel.old_label.clone(); // override labels current_label
                     Mode::Label
                 }
             };
@@ -438,7 +449,10 @@ impl eframe::App for Boundrs {
                     Mode::Relabel => {
                         let app = &mut self.relabel;
 
-                        app.draw_img(ui);
+                        let img_response = app.draw_img(ui);
+
+                        // Handle right click
+                        app.handle_img_response(img_response, ui);
 
                         // Draw bbs
                         app.draw_bbs(ui);
