@@ -10,6 +10,7 @@ use crate::dataset::{
 pub struct Relabeling {
     // index of currently editing label in old_label
     highlighted: Option<usize>,
+    zoom: f32,
     image_texture: egui::TextureHandle,
     img_rect: Rect,
     old_dataset: Dataset<Card>,
@@ -29,6 +30,7 @@ impl Relabeling {
         let highlighted = None;
         let mut relabeling = Relabeling {
             highlighted,
+            zoom: 1.0,
             image_texture,
             img_rect: Rect::NOTHING,
             old_dataset,
@@ -64,6 +66,10 @@ impl Relabeling {
                     .text(format!("{current} out of {max} images")),
             );
         });
+        ui.horizontal(|ui| {
+            ui.label("Zoom image:");
+            ui.add(DragValue::new(&mut self.zoom).speed(0.01));
+        });
         ui.vertical(|ui| {
             ui.separator();
             ui.label(RichText::new("How to use").heading());
@@ -81,8 +87,11 @@ impl Relabeling {
     }
     pub fn draw_img(&mut self, ui: &mut Ui) {
         let img_response = ui.add(
-            egui::Image::new(&self.image_texture, self.image_texture.size_vec2())
-                .sense(Sense::click_and_drag()),
+            egui::Image::new(
+                &self.image_texture,
+                self.image_texture.size_vec2() * self.zoom,
+            )
+            .sense(Sense::click_and_drag()),
         );
         self.img_rect = img_response.rect;
     }

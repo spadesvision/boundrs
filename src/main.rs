@@ -39,6 +39,7 @@ enum BBoxInput {
 
 struct Labeling {
     dataset: Dataset<DynLabel>,
+    zoom: f32,
     image_texture: egui::TextureHandle,
     mask_texture: egui::TextureHandle,
     img_rect: Rect,
@@ -52,6 +53,9 @@ struct Labeling {
 
 impl Labeling {
     fn new(cc: &Context) -> Self {
+        let ppp = cc.pixels_per_point();
+        println!("Current pixels per point {ppp}");
+        // cc.set_pixels_per_point(2.0);
         let shown_classes = HashSet::new();
         let dataset = Dataset::from_input_dir().unwrap();
         let image = dataset.current_image().unwrap();
@@ -61,6 +65,7 @@ impl Labeling {
         let mask_texture = cc.load_texture("mask", mask, egui::TextureOptions::LINEAR);
         Labeling {
             dataset,
+            zoom: 1.0,
             image_texture,
             mask_texture,
             img_rect: Rect::NOTHING,
@@ -101,6 +106,10 @@ impl Labeling {
             ui.label("Shown classes:");
             ui.label(format!("{:?}", self.shown_classes));
         });
+        ui.horizontal(|ui| {
+            ui.label("Zoom image:");
+            ui.add(DragValue::new(&mut self.zoom).speed(0.01));
+        });
         ui.vertical(|ui| {
             ui.separator();
             ui.label(RichText::new("How to use").heading());
@@ -122,8 +131,11 @@ impl Labeling {
     }
     pub fn draw_img(&mut self, ui: &mut Ui) -> Response {
         let img_response = ui.add(
-            egui::Image::new(&self.image_texture, self.image_texture.size_vec2())
-                .sense(Sense::click_and_drag()),
+            egui::Image::new(
+                &self.image_texture,
+                self.image_texture.size_vec2() * self.zoom,
+            )
+            .sense(Sense::click_and_drag()),
         );
         self.img_rect = img_response.rect;
         img_response
