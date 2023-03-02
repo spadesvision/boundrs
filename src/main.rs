@@ -10,7 +10,7 @@ use image::{Rgba, RgbaImage};
 mod relabeling;
 use relabeling::Relabeling;
 
-#[derive(PartialEq)]
+#[derive(PartialEq, Debug)]
 enum Mode {
     Label,
     Relabel,
@@ -40,6 +40,7 @@ enum BBoxInput {
 struct Labeling {
     dataset: Dataset<DynLabel>,
     zoom: f32,
+    // TODO move this to main app, pass new texture out of label / relabel function
     image_texture: egui::TextureHandle,
     mask_texture: egui::TextureHandle,
     img_rect: Rect,
@@ -314,6 +315,28 @@ impl Boundrs {
             mode: Mode::Label,
         })
     }
+
+    fn handle_mode_switch(&mut self, ctx: &Context) {
+        // We save the current label and update the state in the new mode
+        if ctx.input(|i| i.key_pressed(Key::Tab)) {
+            self.mode = match self.mode {
+                Mode::Label => {
+                    let (_, current_pos, _) = self.label.dataset.get_progress();
+                    let label_move = DatasetMovement::JumpTo(current_pos);
+                    self.label.dataset_move(label_move, ctx);
+                    let relabel_old_move = DatasetMovement::JumpTo(current_pos);
+                    let relabel_new_move = DatasetMovement::JumpTo(current_pos);
+                    self.relabel.go(relabel_old_move, relabel_new_move, ctx);
+                    // self.relabel.old_label = self.label.current_label;
+                    Mode::Relabel
+                }
+                Mode::Relabel => {
+                    // let (_, current_pos, _) = self.relabel.old_dataset.get_progress();
+                    Mode::Label
+                }
+            };
+        }
+    }
 }
 
 #[inline]
@@ -351,10 +374,11 @@ fn generate_mask(
 impl eframe::App for Boundrs {
     fn update(&mut self, ctx: &Context, _frame: &mut eframe::Frame) {
         egui::Window::new("Boundrs Labeling").show(ctx, |ui| {
-            ui.horizontal(|ui| {
-                ui.selectable_value(&mut self.mode, Mode::Label, "Label");
-                ui.selectable_value(&mut self.mode, Mode::Relabel, "Relabel");
-            });
+            // ui.horizontal(|ui| {
+            //     ui.selectable_value(&mut self.mode, Mode::Label, "Label");
+            //     ui.selectable_value(&mut self.mode, Mode::Relabel, "Relabel");
+            // });
+            ui.label(format!("Current mode: {:?}", self.mode));
             ui.separator();
 
             match self.mode {
@@ -366,6 +390,8 @@ impl eframe::App for Boundrs {
             .frame(egui::Frame::none().fill(Color32::BLACK))
             .show(ctx, |ui| {
                 // Draw image
+
+                self.handle_mode_switch(ctx);
 
                 match self.mode {
                     Mode::Label => {

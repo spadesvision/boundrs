@@ -298,19 +298,9 @@ impl eframe::App for Relabeling {
                 );
                 self.img_rect = img_response.rect;
 
-                // Draw guides
-                // let pos = ctx.input(|i|i.pointer.hover_pos());
-                // if let Some(pos) = pos {
-                //     self.draw_guide(ui, pos)
-                // }
-                // self.draw_partial_box(ui);
-
                 // Draw bbs
                 self.draw_bbs(ui);
                 self.draw_highlight(ui);
-
-                // // Handle clicks for bbs
-                // self.handle_img_response(img_response, ui);
 
                 // Handle prev next picture keyboard
                 self.handle_left_right(ctx);
@@ -320,12 +310,6 @@ impl eframe::App for Relabeling {
 
                 // Handle labels clearing
                 self.handle_clear(ctx);
-
-                // Handle filter mode
-                // let filter_pressed = ctx.input(|i|i.key_pressed(egui::Key::F));
-                // if filter_pressed {
-                //     self.filter = !self.filter;
-                // }
 
                 // Handle repeat button
                 if ctx.input(|i| i.key_pressed(egui::Key::R)) {
