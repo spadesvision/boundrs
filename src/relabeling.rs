@@ -17,6 +17,7 @@ pub struct Relabeling {
     new_dataset: Dataset<CardSuit>,
     pub old_label: YoloLabel<DynLabel>,
     new_label: YoloLabel<CardSuit>,
+    repeat_iou: f32,
 }
 
 impl Relabeling {
@@ -37,6 +38,7 @@ impl Relabeling {
             new_dataset,
             old_label,
             new_label,
+            repeat_iou: 0.95,
         };
         relabeling.highlighted = relabeling.find_next_highlighted();
         relabeling
@@ -69,6 +71,10 @@ impl Relabeling {
         ui.horizontal(|ui| {
             ui.label("Zoom image:");
             ui.add(DragValue::new(&mut self.zoom).speed(0.01));
+        });
+        ui.horizontal(|ui| {
+            ui.label("Repeat iou:");
+            ui.add(DragValue::new(&mut self.repeat_iou).speed(0.01));
         });
         ui.vertical(|ui| {
             ui.separator();
@@ -237,32 +243,33 @@ impl Relabeling {
             }
         }
     }
-    pub fn take_similar_bbs(&mut self, new_label_candidate: YoloLabel<CardSuit>) {
+    pub fn take_similar_bbs(&mut self, new_label_candidates: Vec<YoloLabel<CardSuit>>) {
         self.new_label = vec![];
         for old_bbs in self.old_label.iter() {
-            for new_bbs in new_label_candidate.iter() {
+            for new_bbs in new_label_candidates.iter().flatten() {
                 let old_rect = old_bbs.to_screen_rect(self.img_rect);
                 let new_rect = new_bbs.to_screen_rect(self.img_rect);
                 let intersect = old_rect.intersect(new_rect).area();
                 let union = old_rect.union(new_rect).area();
                 let iou = intersect / union;
-                if iou > 0.95 {
+                if iou > self.repeat_iou {
                     let new_label =
                         BoundingBox::from_rect(old_rect, self.img_rect, new_bbs.class());
-                    self.new_label.push(new_label)
+                    self.new_label.push(new_label);
+                    break;
                 }
             }
         }
     }
     pub fn repeat_bbs(&mut self) -> Result<()> {
-        let previous_label = self.new_dataset.previous_label()?;
-        self.take_similar_bbs(previous_label);
+        let previous_labels = self.new_dataset.previous_labels(3)?;
+        self.take_similar_bbs(previous_labels);
         self.highlighted = self.find_next_highlighted();
         Ok(())
     }
     pub fn remove_labels(&mut self, pos: Pos2, img_rect: Rect) {
-        self.old_label
-            .retain(|label| !label.to_screen_rect(img_rect).contains(pos));
+        // self.old_label
+        //     .retain(|label| !label.to_screen_rect(img_rect).contains(pos));
         self.new_label
             .retain(|label| !label.to_screen_rect(img_rect).contains(pos));
         self.highlighted = self.find_next_highlighted();

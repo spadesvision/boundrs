@@ -165,8 +165,8 @@ impl Labeling {
     }
 
     pub fn repeat_bbs(&mut self) -> Result<()> {
-        let yolo_label = self.dataset.previous_label()?;
-        self.current_label = yolo_label;
+        let yolo_label = self.dataset.previous_labels(1)?;
+        self.current_label = yolo_label[0].clone();
         Ok(())
     }
     fn remove_bbs(&mut self, pos: Pos2, img_rect: Rect) {

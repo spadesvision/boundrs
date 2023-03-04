@@ -544,9 +544,14 @@ impl<L: DatasetLabel> Dataset<L> {
     pub fn current_label(&self) -> Result<YoloLabel<L>> {
         self.data[self.i].load_label()
     }
-    pub fn previous_label(&self) -> Result<YoloLabel<L>> {
-        let previous = self.i.saturating_sub(1);
-        self.data[previous].load_label()
+    pub fn previous_labels(&self, num: usize) -> Result<Vec<YoloLabel<L>>> {
+        (1..=num)
+            .into_iter()
+            .map(|back| {
+                let previous = self.i.saturating_sub(back);
+                self.data[previous].load_label()
+            })
+            .collect()
     }
     pub fn current_name(&self) -> String {
         self.data[self.i].name()
