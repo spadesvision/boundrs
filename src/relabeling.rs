@@ -236,7 +236,7 @@ impl Relabeling {
             );
             self.new_label.push(new_bbs);
             self.highlighted = self.find_next_highlighted();
-            if self.new_label.len() == self.old_label.len() && self.highlighted.is_none() {
+            while self.new_label.len() == self.old_label.len() && self.highlighted.is_none() {
                 let (move_old, move_new) = (DatasetMovement::Next, DatasetMovement::Next);
                 self.go(move_old, move_new, ctx);
                 self.repeat_bbs().unwrap();
