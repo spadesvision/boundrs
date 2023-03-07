@@ -17,3 +17,4 @@ anyhow = "*"
 lazy_static = "1.4.0"
 serde = { version = "*", features = ["derive"] }
 toml = "*"
+clap = { version = "4.1.8", features = ["derive"] }

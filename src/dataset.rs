@@ -10,7 +10,7 @@ use std::collections::HashSet;
 use std::fs::File;
 use std::io::prelude::*;
 use std::marker::PhantomData;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::str::FromStr;
 
 lazy_static! {
@@ -499,13 +499,13 @@ pub struct Dataset<L: DatasetLabel> {
 }
 
 impl<L: DatasetLabel> Dataset<L> {
-    pub fn from_input_dir() -> Result<Self> {
+    pub fn from_input_dir(labels_dir: &Path) -> Result<Self> {
         let mut data = vec![];
-        let labels_dir = PathBuf::from("./input");
+        // let labels_dir = PathBuf::from("./input");
         let mut paths: Vec<_> = glob("./input/*.jpg")?.filter_map(Result::ok).collect();
         alphanumeric_sort::sort_path_slice(&mut paths);
         for img_src in paths.into_iter() {
-            data.push(Datapoint::new(img_src, labels_dir.clone()))
+            data.push(Datapoint::new(img_src, labels_dir.to_path_buf()))
         }
         if data.is_empty() {
             return Err(anyhow!(
@@ -523,8 +523,8 @@ impl<L: DatasetLabel> Dataset<L> {
             i: first_no_label,
         })
     }
-    pub fn with_label_prefix(prefix: &str) -> Result<Self> {
-        let mut dataset = Dataset::from_input_dir()?;
+    pub fn with_prefix(labels_dir: &Path, prefix: &str) -> Result<Self> {
+        let mut dataset = Dataset::from_input_dir(labels_dir)?;
         for mut datapoint in &mut dataset.data {
             let label_name = datapoint
                 .label_src

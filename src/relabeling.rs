@@ -1,3 +1,5 @@
+use std::path::Path;
+
 use anyhow::Result;
 use eframe::egui;
 use egui::*;
@@ -21,9 +23,9 @@ pub struct Relabeling {
 }
 
 impl Relabeling {
-    pub fn new(ctx: &Context) -> Self {
-        let old_dataset = Dataset::from_input_dir().unwrap();
-        let new_dataset = Dataset::with_label_prefix("new_").unwrap();
+    pub fn new(ctx: &Context, dataset_dir: &Path, old_prefix: &str, new_prefix: &str) -> Self {
+        let old_dataset = Dataset::with_prefix(dataset_dir, old_prefix).unwrap();
+        let new_dataset = Dataset::with_prefix(dataset_dir, new_prefix).unwrap();
         let image = old_dataset.current_image().unwrap();
         let image_texture = ctx.load_texture("my-image", image, egui::TextureOptions::LINEAR);
         let old_label = old_dataset.current_label().unwrap();

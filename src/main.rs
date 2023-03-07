@@ -1,7 +1,10 @@
 use anyhow::Result;
-use eframe::egui;
+use eframe::{egui, CreationContext};
 use egui::*;
-use std::collections::HashSet;
+use std::{
+    collections::HashSet,
+    path::{Path, PathBuf},
+};
 
 mod dataset;
 use dataset::{BoundingBox, Dataset, DatasetLabel, DatasetMovement, DynLabel, YoloBB, YoloLabel};
@@ -10,6 +13,21 @@ use image::{Rgba, RgbaImage};
 mod relabeling;
 use relabeling::Relabeling;
 
+use clap::Parser;
+
+/// Simple program to greet a person
+#[derive(Parser, Debug)]
+#[command(author, version, about, long_about = None)]
+struct Args {
+    #[arg(short, long)]
+    data_dir: PathBuf,
+
+    #[arg(long, default_value = "")]
+    prefix_old: String,
+
+    #[arg(long, default_value = "new_")]
+    prefix_new: String,
+}
 #[derive(PartialEq, Debug)]
 enum Mode {
     Label,
@@ -17,6 +35,7 @@ enum Mode {
 }
 
 fn main() {
+    let args = Args::parse();
     let options = eframe::NativeOptions {
         initial_window_size: Some(egui::vec2(1920.0, 1080.0)),
         ..Default::default()
@@ -25,7 +44,7 @@ fn main() {
     eframe::run_native(
         "Show an image with eframe/egui",
         options,
-        Box::new(Boundrs::build_app),
+        Box::new(|cc| Box::new(Boundrs::new(cc, args))),
     )
     .unwrap();
 }
@@ -53,12 +72,12 @@ struct Labeling {
 }
 
 impl Labeling {
-    fn new(cc: &Context) -> Self {
+    fn new(cc: &Context, dataset_dir: &Path, prefix: &str) -> Self {
         let ppp = cc.pixels_per_point();
         println!("Current pixels per point {ppp}");
         // cc.set_pixels_per_point(2.0);
         let shown_classes = HashSet::new();
-        let dataset = Dataset::from_input_dir().unwrap();
+        let dataset = Dataset::with_prefix(dataset_dir, prefix).unwrap();
         let image = dataset.current_image().unwrap();
         let image_texture = cc.load_texture("my-image", image, egui::TextureOptions::LINEAR);
         let current_bbs = dataset.current_label().unwrap();
@@ -305,16 +324,16 @@ struct Boundrs {
 
 impl Boundrs {
     // TODO error handling
-    fn build_app(cc: &eframe::CreationContext<'_>) -> Box<dyn eframe::App> {
-        let label_state = Labeling::new(&cc.egui_ctx);
-        let relabel_state = Relabeling::new(&cc.egui_ctx);
+    // fn build_app(cc: &eframe::CreationContext<'_>) -> Box<dyn eframe::App> {
+    //     let label_state = Labeling::new(&cc.egui_ctx);
+    //     let relabel_state = Relabeling::new(&cc.egui_ctx);
 
-        Box::new(Self {
-            label: label_state,
-            relabel: relabel_state,
-            mode: Mode::Label,
-        })
-    }
+    //     Box::new(Self {
+    //         label: label_state,
+    //         relabel: relabel_state,
+    //         mode: Mode::Label,
+    //     })
+    // }
 
     fn handle_mode_switch(&mut self, ctx: &Context) {
         // We save the current label and update the state in the new mode
@@ -346,6 +365,22 @@ impl Boundrs {
                     Mode::Label
                 }
             };
+        }
+    }
+
+    fn new(cc: &CreationContext, args: Args) -> Self {
+        let label_state = Labeling::new(&cc.egui_ctx, &args.data_dir, &args.prefix_old);
+        let relabel_state = Relabeling::new(
+            &cc.egui_ctx,
+            &args.data_dir,
+            &args.prefix_old,
+            &args.prefix_new,
+        );
+
+        Self {
+            label: label_state,
+            relabel: relabel_state,
+            mode: Mode::Label,
         }
     }
 }

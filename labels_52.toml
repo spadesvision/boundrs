@@ -1,0 +1,207 @@
+[[labels]]
+keys = ["Num1", "H"]
+name = "AH"
+
+[[labels]]
+keys = ["K", "H"]
+name = "KH"
+
+[[labels]]
+keys = ["Q", "H"]
+name = "QH"
+
+[[labels]]
+keys = ["J", "H"]
+name = "JH"
+
+[[labels]]
+keys = ["Num0", "H"]
+name = "10H"
+
+[[labels]]
+keys = ["Num9", "H"]
+name = "9H"
+
+[[labels]]
+keys = ["Num8", "H"]
+name = "8H"
+
+[[labels]]
+keys = ["Num7", "H"]
+name = "7H"
+
+[[labels]]
+keys = ["Num6", "H"]
+name = "6H"
+
+[[labels]]
+keys = ["Num5", "H"]
+name = "5H"
+
+[[labels]]
+keys = ["Num4", "H"]
+name = "4H"
+
+[[labels]]
+keys = ["Num3", "H"]
+name = "3H"
+
+[[labels]]
+keys = ["Num2", "H"]
+name = "2H"
+
+[[labels]]
+keys = ["Num1", "D"]
+name = "AD"
+
+[[labels]]
+keys = ["K", "D"]
+name = "KD"
+
+[[labels]]
+keys = ["Q", "D"]
+name = "QD"
+
+[[labels]]
+keys = ["J", "D"]
+name = "JD"
+
+[[labels]]
+keys = ["Num0", "D"]
+name = "10D"
+
+[[labels]]
+keys = ["Num9", "D"]
+name = "9D"
+
+[[labels]]
+keys = ["Num8", "D"]
+name = "8D"
+
+[[labels]]
+keys = ["Num7", "D"]
+name = "7D"
+
+[[labels]]
+keys = ["Num6", "D"]
+name = "6D"
+
+[[labels]]
+keys = ["Num5", "D"]
+name = "5D"
+
+[[labels]]
+keys = ["Num4", "D"]
+name = "4D"
+
+[[labels]]
+keys = ["Num3", "D"]
+name = "3D"
+
+[[labels]]
+keys = ["Num2", "D"]
+name = "2D"
+
+[[labels]]
+keys = ["Num1", "C"]
+name = "AC"
+
+[[labels]]
+keys = ["K", "C"]
+name = "KC"
+
+[[labels]]
+keys = ["Q", "C"]
+name = "QC"
+
+[[labels]]
+keys = ["J", "C"]
+name = "JC"
+
+[[labels]]
+keys = ["Num0", "C"]
+name = "10C"
+
+[[labels]]
+keys = ["Num9", "C"]
+name = "9C"
+
+[[labels]]
+keys = ["Num8", "C"]
+name = "8C"
+
+[[labels]]
+keys = ["Num7", "C"]
+name = "7C"
+
+[[labels]]
+keys = ["Num6", "C"]
+name = "6C"
+
+[[labels]]
+keys = ["Num5", "C"]
+name = "5C"
+
+[[labels]]
+keys = ["Num4", "C"]
+name = "4C"
+
+[[labels]]
+keys = ["Num3", "C"]
+name = "3C"
+
+[[labels]]
+keys = ["Num2", "C"]
+name = "2C"
+
+[[labels]]
+keys = ["Num1", "S"]
+name = "AS"
+
+[[labels]]
+keys = ["K", "S"]
+name = "KS"
+
+[[labels]]
+keys = ["Q", "S"]
+name = "QS"
+
+[[labels]]
+keys = ["J", "S"]
+name = "JS"
+
+[[labels]]
+keys = ["Num0", "S"]
+name = "10S"
+
+[[labels]]
+keys = ["Num9", "S"]
+name = "9S"
+
+[[labels]]
+keys = ["Num8", "S"]
+name = "8S"
+
+[[labels]]
+keys = ["Num7", "S"]
+name = "7S"
+
+[[labels]]
+keys = ["Num6", "S"]
+name = "6S"
+
+[[labels]]
+keys = ["Num5", "S"]
+name = "5S"
+
+[[labels]]
+keys = ["Num4", "S"]
+name = "4S"
+
+[[labels]]
+keys = ["Num3", "S"]
+name = "3S"
+
+[[labels]]
+keys = ["Num2", "S"]
+name = "2S"
