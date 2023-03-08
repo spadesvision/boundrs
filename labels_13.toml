@@ -1,0 +1,55 @@
+[[labels]]
+keys = ["Num1"]
+name = "A"
+
+[[labels]]
+keys = ["K"]
+name = "K"
+
+[[labels]]
+keys = ["Q"]
+name = "Q"
+
+[[labels]]
+keys = ["J"]
+name = "J"
+
+[[labels]]
+keys = ["Num0"]
+name = "10"
+
+[[labels]]
+keys = ["Num9"]
+name = "9"
+
+[[labels]]
+keys = ["Num8"]
+name = "8"
+
+[[labels]]
+keys = ["Num7"]
+name = "7"
+
+[[labels]]
+keys = ["Num6"]
+name = "6"
+
+[[labels]]
+keys = ["Num5"]
+name = "5"
+
+[[labels]]
+keys = ["Num4"]
+name = "4"
+
+[[labels]]
+keys = ["Num3"]
+name = "3"
+
+[[labels]]
+keys = ["Num2"]
+name = "2"
+
+[[labels]]
+keys = ["H"]
+name = "Hand"

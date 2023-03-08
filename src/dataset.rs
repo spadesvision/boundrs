@@ -9,19 +9,13 @@ use serde::Deserialize;
 use std::collections::HashSet;
 use std::fs::File;
 use std::io::prelude::*;
-use std::marker::PhantomData;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
 
 lazy_static! {
-    static ref CONFIG_STR: String = std::fs::read_to_string("labels.toml").expect("labels.toml file should exist");
-    static ref DYN_CONFIG: DynLabelConfig = toml::from_str(&CONFIG_STR).expect("labels.toml should contain a table called labels with columns keys and name");
+    // static ref CONFIG_STR: String = std::fs::read_to_string("labels.toml").expect("labels.toml file should exist");
+    static ref DYN_CONFIG: DynLabelConfig = DynLabelConfig::load_from_file("labels.toml").expect("labels.toml should contain a table called labels with columns keys and name");
     // static ref DYN_SHORTCUTS: HashMap<Vec<Key>, DynLabel> = DYN_CONFIG.clone().into_shortcuts();
-}
-
-#[derive(Deserialize, Clone)]
-pub struct DynLabelConfig {
-    labels: Vec<DynLabelSpec>,
 }
 
 #[derive(Deserialize, Clone)]
@@ -30,28 +24,29 @@ pub struct DynLabelSpec {
     name: String,
 }
 
-pub trait DatasetLabel
-where
-    Self: std::fmt::Debug + Clone + Copy + PartialEq + Eq + std::hash::Hash,
-{
-    fn color(self) -> Color32;
-    fn keys_to_class(keys: HashSet<Key>) -> Option<Self> {
-        keys.into_iter()
-            .filter_map(|key| Self::key_to_class(key))
-            .next()
+impl DynLabelSpec {
+    pub fn into_label(self, i: usize, color: Color32) -> DynLabel {
+        DynLabel {
+            i,
+            name: self.name,
+            color,
+            keys: self.keys,
+        }
     }
-    fn key_to_class(key: Key) -> Option<Self>;
-    fn from_usize(i: usize) -> Self;
-    fn to_usize(self) -> usize;
-    fn to_name(self) -> String;
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct DynLabel(pub usize);
+#[derive(Deserialize, Clone)]
+pub struct DynLabelConfig {
+    labels: Vec<DynLabelSpec>,
+}
 
-impl DatasetLabel for DynLabel {
-    fn color(self) -> Color32 {
-        match self.0 % 13 {
+impl DynLabelConfig {
+    pub fn load_from_file<P: AsRef<Path>>(path: P) -> Result<Self> {
+        let toml_str = std::fs::read_to_string(path)?;
+        Ok(toml::from_str(&toml_str)?)
+    }
+    pub fn color_for(&self, i: usize) -> Color32 {
+        match i % 13 {
             0 => Color32::from_rgb(0x2f, 0x4f, 0x4f),
             1 => Color32::from_rgb(0x8b, 0x45, 0x13),
             2 => Color32::from_rgb(0x00, 0x80, 0x00),
@@ -68,278 +63,64 @@ impl DatasetLabel for DynLabel {
             _ => unreachable!(),
         }
     }
-    fn keys_to_class(keys: HashSet<Key>) -> Option<Self> {
-        DYN_CONFIG
-            .labels
-            .iter()
-            .enumerate()
-            .filter(|(_i, spec)| spec.keys == keys)
-            .map(|(i, _)| DynLabel(i))
-            .next()
+    pub fn label_from_usize(&self, i: usize) -> Option<DynLabel> {
+        self.labels
+            .get(i)
+            .map(|spec| spec.clone().into_label(i, self.color_for(i)))
     }
-    fn from_usize(i: usize) -> Self {
-        DynLabel(i)
+    // pub fn keybindings(&self) -> impl Iterator<Item = HashSet<Key>> {
+    //     self.labels.clone().into_iter().map(|l| l.keys)
+    // }
+    pub fn num_labels(&self) -> usize {
+        self.labels.len()
     }
-    fn to_usize(self) -> usize {
-        self.0
-    }
-    fn to_name(self) -> String {
-        DYN_CONFIG.labels[self.0].name.clone()
-    }
-
-    fn key_to_class(key: Key) -> Option<Self> {
-        DYN_CONFIG
-            .labels
-            .iter()
-            .enumerate()
-            .filter(|(_i, spec)| spec.keys.contains(&key))
-            .map(|(i, _)| DynLabel(i))
-            .next()
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum Card {
-    A = 0,
-    K,
-    Q,
-    J,
-    V10,
-    V9,
-    V8,
-    V7,
-    V6,
-    V5,
-    V4,
-    V3,
-    V2,
-}
-impl DatasetLabel for Card {
-    fn color(self) -> Color32 {
-        use Card::*;
-        match self {
-            A => Color32::from_rgb(0x2f, 0x4f, 0x4f),
-            K => Color32::from_rgb(0x8b, 0x45, 0x13),
-            Q => Color32::from_rgb(0x00, 0x80, 0x00),
-            J => Color32::from_rgb(0x4b, 0x00, 0x82),
-            V10 => Color32::from_rgb(0xff, 0x00, 0x00),
-            V9 => Color32::from_rgb(0xff, 0xff, 0x00),
-            V8 => Color32::from_rgb(0x00, 0xff, 0x00),
-            V7 => Color32::from_rgb(0x00, 0xff, 0xff),
-            V6 => Color32::from_rgb(0x00, 0x00, 0xff),
-            V5 => Color32::from_rgb(0xff, 0x00, 0xff),
-            V4 => Color32::from_rgb(0x64, 0x95, 0xed),
-            V3 => Color32::from_rgb(0xff, 0xda, 0xb9),
-            V2 => Color32::from_rgb(0xff, 0x69, 0xb6),
-        }
-    }
-
-    fn key_to_class(key: Key) -> Option<Self> {
-        match key {
-            Key::Num1 => Some(Card::A),
-            Key::Num2 => Some(Card::V2),
-            Key::Num3 => Some(Card::V3),
-            Key::Num4 => Some(Card::V4),
-            Key::Num5 => Some(Card::V5),
-            Key::Num6 => Some(Card::V6),
-            Key::Num7 => Some(Card::V7),
-            Key::Num8 => Some(Card::V8),
-            Key::Num9 => Some(Card::V9),
-            Key::Num0 => Some(Card::V10),
-            Key::J => Some(Card::J),
-            Key::Q => Some(Card::Q),
-            Key::K => Some(Card::K),
-            _ => None,
-        }
-    }
-
-    fn keys_to_class(keys: HashSet<Key>) -> Option<Self> {
-        if let Some(key) = keys.into_iter().next() {
-            match key {
-                Key::Num1 => Some(Card::A),
-                Key::Num2 => Some(Card::V2),
-                Key::Num3 => Some(Card::V3),
-                Key::Num4 => Some(Card::V4),
-                Key::Num5 => Some(Card::V5),
-                Key::Num6 => Some(Card::V6),
-                Key::Num7 => Some(Card::V7),
-                Key::Num8 => Some(Card::V8),
-                Key::Num9 => Some(Card::V9),
-                Key::Num0 => Some(Card::V10),
-                Key::J => Some(Card::J),
-                Key::Q => Some(Card::Q),
-                Key::K => Some(Card::K),
-                _ => None,
+    pub fn label_from_keys(&self, keys: &HashSet<Key>) -> Option<DynLabel> {
+        // self.labels.iter().filter(|l| l.keys.is_subset(keys)).map().next()
+        for (i, spec) in self.labels.iter().enumerate() {
+            if spec.keys.is_subset(keys) {
+                return self.label_from_usize(i);
             }
-        } else {
-            None
         }
-    }
-
-    fn from_usize(i: usize) -> Card {
-        use Card::*;
-        match i {
-            0 => A,
-            1 => K,
-            2 => Q,
-            3 => J,
-            4 => V10,
-            5 => V9,
-            6 => V8,
-            7 => V7,
-            8 => V6,
-            9 => V5,
-            10 => V4,
-            11 => V3,
-            12 => V2,
-            _ => unreachable!(),
-        }
-    }
-    fn to_usize(self) -> usize {
-        use Card::*;
-        match self {
-            A => 0,
-            K => 1,
-            Q => 2,
-            J => 3,
-            V10 => 4,
-            V9 => 5,
-            V8 => 6,
-            V7 => 7,
-            V6 => 8,
-            V5 => 9,
-            V4 => 10,
-            V3 => 11,
-            V2 => 12,
-        }
-    }
-
-    fn to_name(self) -> String {
-        use Card::*;
-        match self {
-            A => "A".into(),
-            K => "K".into(),
-            Q => "Q".into(),
-            J => "J".into(),
-            V10 => "10".into(),
-            V9 => "9".into(),
-            V8 => "8".into(),
-            V7 => "7".into(),
-            V6 => "6".into(),
-            V5 => "5".into(),
-            V4 => "4".into(),
-            V3 => "3".into(),
-            V2 => "2".into(),
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum Suit {
-    Hearts = 0,
-    Diamonds,
-    Clubs,
-    Spades,
-}
-
-impl DatasetLabel for Suit {
-    fn color(self) -> Color32 {
-        use Suit::*;
-        match self {
-            Hearts => Color32::from_rgb(0x2f, 0x4f, 0x4f),
-            Diamonds => Color32::from_rgb(0x8b, 0x45, 0x13),
-            Clubs => Color32::from_rgb(0x00, 0x80, 0x00),
-            Spades => Color32::from_rgb(0x4b, 0x00, 0x82),
-        }
-    }
-
-    fn key_to_class(key: Key) -> Option<Self> {
-        use Suit::*;
-        match key {
-            Key::H => Some(Hearts),
-            Key::D => Some(Diamonds),
-            Key::C => Some(Clubs),
-            Key::S => Some(Spades),
-            _ => None,
-        }
-    }
-    fn from_usize(i: usize) -> Suit {
-        use Suit::*;
-        // println!("suit from {i}");
-        match i {
-            0 => Hearts,
-            1 => Diamonds,
-            2 => Clubs,
-            3 => Spades,
-            _ => unreachable!(),
-        }
-    }
-    fn to_usize(self) -> usize {
-        use Suit::*;
-        match self {
-            Hearts => 0,
-            Diamonds => 1,
-            Clubs => 2,
-            Spades => 3,
-        }
-    }
-    fn to_name(self) -> String {
-        use Suit::*;
-        match self {
-            Hearts => "H".into(),
-            Diamonds => "D".into(),
-            Clubs => "C".into(),
-            Spades => "S".into(),
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct CardSuit(pub Card, pub Suit);
-
-impl DatasetLabel for CardSuit {
-    fn color(self) -> Color32 {
-        self.0.color()
-    }
-    fn key_to_class(_key: Key) -> Option<Self> {
         None
     }
-    fn keys_to_class(_keys: HashSet<Key>) -> Option<Self> {
-        None
-    }
-    fn from_usize(i: usize) -> CardSuit {
-        // println!("CardSuit from usize {i}");
-        let suit_usize = i / 13;
-        let card_usize = i % 13;
-        let suit = Suit::from_usize(suit_usize);
-        let card = Card::from_usize(card_usize);
-        CardSuit(card, suit)
-    }
-    fn to_usize(self) -> usize {
-        let (card, suit) = (self.0, self.1);
-        let card_usize = card.to_usize();
-        let suit_usize = suit.to_usize();
-        13 * suit_usize + card_usize
-    }
-    fn to_name(self) -> String {
-        let (card, suit) = (self.0, self.1);
-        format!("{}{}", card.to_name(), suit.to_name())
-    }
 }
 
-pub type YoloLabel<L> = Vec<YoloBB<L>>;
+// pub trait DatasetLabel
+// where
+//     Self: std::fmt::Debug + Clone + Copy + PartialEq + Eq + std::hash::Hash,
+// {
+//     fn color(self) -> Color32;
+//     fn keys_to_class(keys: HashSet<Key>) -> Option<Self> {
+//         keys.into_iter()
+//             .filter_map(|key| Self::key_to_class(key))
+//             .next()
+//     }
+//     fn key_to_class(key: Key) -> Option<Self>;
+//     fn from_usize(i: usize) -> Self;
+//     fn to_usize(self) -> usize;
+//     fn to_name(self) -> String;
+// }
+
+#[derive(Debug, Clone)]
+pub struct DynLabel {
+    pub i: usize,
+    pub name: String,
+    pub color: Color32,
+    pub keys: HashSet<Key>,
+}
+
+pub type YoloLabel = Vec<YoloBB>;
 
 #[derive(Debug, Clone, Copy)]
-pub struct YoloBB<L: DatasetLabel> {
-    class_num: usize,
+pub struct YoloBB {
+    pub class_num: usize,
     x: f32,
     y: f32,
     w: f32,
     h: f32,
-    label: PhantomData<L>,
 }
 
-impl<L: DatasetLabel> FromStr for YoloBB<L> {
+impl FromStr for YoloBB {
     type Err = Error;
 
     fn from_str(s: &str) -> Result<Self> {
@@ -353,12 +134,11 @@ impl<L: DatasetLabel> FromStr for YoloBB<L> {
             y,
             w,
             h,
-            label: PhantomData::default(),
         })
     }
 }
 
-impl<L: DatasetLabel> YoloBB<L> {
+impl YoloBB {
     fn as_string(self) -> String {
         format!(
             "{} {} {} {} {}",
@@ -367,24 +147,8 @@ impl<L: DatasetLabel> YoloBB<L> {
     }
 }
 
-pub trait BoundingBox<L: DatasetLabel> {
-    // fn rect(&self, size: Vec2) -> Rect;
-    fn to_screen_rect(&self, rect: Rect) -> Rect;
-    fn class(&self) -> L;
-    fn from_rect(rect: Rect, size: Rect, class: L) -> Self;
-}
-
-impl<L: DatasetLabel> BoundingBox<L> for YoloBB<L> {
-    // fn rect(&self, size: Vec2) -> Rect {
-    //     let img_w = size.x;
-    //     let img_h = size.y;
-    //     let yl = self;
-    //     Rect::from_center_size(
-    //         [yl.x * img_w, yl.y * img_h].into(),
-    //         [yl.w * img_w, yl.h * img_h].into(),
-    //     )
-    // }
-    fn to_screen_rect(&self, img_rect: Rect) -> Rect {
+impl YoloBB {
+    pub fn to_screen_rect(self, img_rect: Rect) -> Rect {
         let img_w = img_rect.size().x;
         let img_h = img_rect.size().y;
         let yl = self;
@@ -394,10 +158,17 @@ impl<L: DatasetLabel> BoundingBox<L> for YoloBB<L> {
         );
         rect.translate(img_rect.left_top().to_vec2())
     }
-    fn class(&self) -> L {
-        L::from_usize(self.class_num)
+    pub fn class(&self, config: &DynLabelConfig) -> DynLabel {
+        // TODO improve error handling, or even better, encode in type system
+        config.label_from_usize(self.class_num).unwrap_or_else(|| {
+            panic!(
+                "Config should work with this label, {} > {}",
+                self.class_num,
+                config.num_labels()
+            )
+        })
     }
-    fn from_rect(rect: Rect, img_rect: Rect, class: L) -> Self {
+    pub fn from_rect(rect: Rect, img_rect: Rect, class: &DynLabel) -> Self {
         let rect = rect.intersect(img_rect);
         let rect = rect.translate(-img_rect.left_top().to_vec2());
         let img_size = img_rect.size();
@@ -409,23 +180,21 @@ impl<L: DatasetLabel> BoundingBox<L> for YoloBB<L> {
         let size = rect.size();
         let w = size.x / img_w;
         let h = size.y / img_h;
-        let class_num = class.to_usize();
+        let class_num = class.i;
         YoloBB {
             class_num,
             x: x.clamp(0.0, 1.0),
             y: y.clamp(0.0, 1.0),
             w,
             h,
-            label: PhantomData::default(),
         }
     }
 }
 
 #[derive(Debug)]
-struct Datapoint<L: DatasetLabel> {
+struct Datapoint {
     img_src: PathBuf,
     label_src: PathBuf,
-    label: PhantomData<L>,
 }
 
 fn load_image_from_path(path: &std::path::Path) -> Result<ColorImage> {
@@ -436,7 +205,7 @@ fn load_image_from_path(path: &std::path::Path) -> Result<ColorImage> {
     Ok(ColorImage::from_rgba_unmultiplied(size, pixels.as_slice()))
 }
 
-impl<L: DatasetLabel> Datapoint<L> {
+impl Datapoint {
     fn new(img_src: PathBuf, labels_dir: PathBuf) -> Self {
         let img_filename = img_src
             .file_name()
@@ -444,16 +213,12 @@ impl<L: DatasetLabel> Datapoint<L> {
         let mut label_src = labels_dir;
         label_src.push(img_filename);
         label_src.set_extension("txt");
-        Datapoint::<L> {
-            img_src,
-            label_src,
-            label: PhantomData::default(),
-        }
+        Datapoint { img_src, label_src }
     }
     fn load_image(&self) -> Result<ColorImage> {
         load_image_from_path(&self.img_src)
     }
-    fn load_label(&self) -> Result<YoloLabel<L>> {
+    fn load_label(&self) -> Result<YoloLabel> {
         if !self.label_src.exists() {
             File::create(&self.label_src).expect("File creation should not fail");
         }
@@ -466,7 +231,7 @@ impl<L: DatasetLabel> Datapoint<L> {
         }
         Ok(labels)
     }
-    fn save_label(&self, label: YoloLabel<L>) -> Result<()> {
+    fn save_label(&self, label: YoloLabel) -> Result<()> {
         let mut file = File::create(&self.label_src)?;
         for yolo_label in label {
             writeln!(file, "{}", yolo_label.as_string())?;
@@ -485,20 +250,20 @@ impl<L: DatasetLabel> Datapoint<L> {
 }
 
 #[derive(Clone, PartialEq)]
-pub enum DatasetMovement<L: DatasetLabel> {
+pub enum DatasetMovement {
     Next,
     Previous,
-    NextContaining(HashSet<L>),
-    PreviousContaining(HashSet<L>),
+    NextContaining(HashSet<usize>),
+    PreviousContaining(HashSet<usize>),
     JumpTo(usize),
 }
 
-pub struct Dataset<L: DatasetLabel> {
-    data: Vec<Datapoint<L>>,
+pub struct Dataset {
+    data: Vec<Datapoint>,
     i: usize,
 }
 
-impl<L: DatasetLabel> Dataset<L> {
+impl Dataset {
     pub fn from_input_dir(labels_dir: &Path) -> Result<Self> {
         let mut data = vec![];
         // let labels_dir = PathBuf::from("./input");
@@ -541,10 +306,10 @@ impl<L: DatasetLabel> Dataset<L> {
     pub fn current_image(&self) -> Result<ColorImage> {
         self.data[self.i].load_image()
     }
-    pub fn current_label(&self) -> Result<YoloLabel<L>> {
+    pub fn current_label(&self) -> Result<YoloLabel> {
         self.data[self.i].load_label()
     }
-    pub fn previous_labels(&self, num: usize) -> Result<Vec<YoloLabel<L>>> {
+    pub fn previous_labels(&self, num: usize) -> Result<Vec<YoloLabel>> {
         (1..=num)
             .into_iter()
             .map(|back| {
@@ -559,7 +324,7 @@ impl<L: DatasetLabel> Dataset<L> {
     pub fn get_progress(&self) -> (usize, usize, usize) {
         (0, self.i, self.data.len())
     }
-    fn save_label(&self, label: YoloLabel<L>) -> Result<()> {
+    fn save_label(&self, label: YoloLabel) -> Result<()> {
         self.data[self.i].save_label(label)
     }
     fn next(&mut self) -> Result<()> {
@@ -570,22 +335,26 @@ impl<L: DatasetLabel> Dataset<L> {
         self.i = self.i.saturating_sub(1);
         Ok(())
     }
-    fn next_containing(&mut self, classes: &HashSet<L>) -> Result<()> {
+    fn next_containing(&mut self, classes: &HashSet<usize>) -> Result<()> {
         while self.i < self.data.len() - 1 {
             self.i += 1;
-            let label = self.data[self.i].load_label()?;
-            if label.iter().any(|bb| classes.contains(&bb.class())) {
-                break;
+            if self.data[self.i].label_src.exists() {
+                let label = self.data[self.i].load_label()?;
+                if label.iter().any(|bb| classes.contains(&bb.class_num)) {
+                    break;
+                }
             }
         }
         Ok(())
     }
-    fn previous_containing(&mut self, classes: &HashSet<L>) -> Result<()> {
+    fn previous_containing(&mut self, classes: &HashSet<usize>) -> Result<()> {
         while self.i > 0 {
             self.i -= 1;
-            let label = self.data[self.i].load_label()?;
-            if label.iter().any(|bb| classes.contains(&bb.class())) {
-                break;
+            if self.data[self.i].label_src.exists() {
+                let label = self.data[self.i].load_label()?;
+                if label.iter().any(|bb| classes.contains(&bb.class_num)) {
+                    break;
+                }
             }
         }
         Ok(())
@@ -595,7 +364,7 @@ impl<L: DatasetLabel> Dataset<L> {
         Ok(())
     }
 
-    pub fn go(&mut self, movement: DatasetMovement<L>, label: YoloLabel<L>) -> Result<()> {
+    pub fn go(&mut self, movement: DatasetMovement, label: YoloLabel) -> Result<()> {
         self.save_label(label)?;
         match movement {
             DatasetMovement::Next => self.next(),

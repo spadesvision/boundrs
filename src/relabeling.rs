@@ -4,9 +4,7 @@ use anyhow::Result;
 use eframe::egui;
 use egui::*;
 
-use crate::dataset::{
-    BoundingBox, Card, CardSuit, Dataset, DatasetLabel, DatasetMovement, DynLabel, Suit, YoloLabel,
-};
+use crate::dataset::{Dataset, DatasetMovement, DynLabel, DynLabelConfig, YoloBB, YoloLabel};
 // use image::{Rgba, RgbaImage};
 
 pub struct Relabeling {
@@ -15,15 +13,24 @@ pub struct Relabeling {
     zoom: f32,
     image_texture: egui::TextureHandle,
     img_rect: Rect,
-    pub old_dataset: Dataset<DynLabel>,
-    new_dataset: Dataset<CardSuit>,
-    pub old_label: YoloLabel<DynLabel>,
-    new_label: YoloLabel<CardSuit>,
+    pub old_dataset: Dataset,
+    old_config: DynLabelConfig,
+    new_dataset: Dataset,
+    new_config: DynLabelConfig,
+    pub old_label: YoloLabel,
+    new_label: YoloLabel,
     repeat_iou: f32,
 }
 
 impl Relabeling {
-    pub fn new(ctx: &Context, dataset_dir: &Path, old_prefix: &str, new_prefix: &str) -> Self {
+    pub fn new(
+        ctx: &Context,
+        dataset_dir: &Path,
+        old_prefix: &str,
+        new_prefix: &str,
+        old_config: DynLabelConfig,
+        new_config: DynLabelConfig,
+    ) -> Self {
         let old_dataset = Dataset::with_prefix(dataset_dir, old_prefix).unwrap();
         let new_dataset = Dataset::with_prefix(dataset_dir, new_prefix).unwrap();
         let image = old_dataset.current_image().unwrap();
@@ -37,8 +44,10 @@ impl Relabeling {
             image_texture,
             img_rect: Rect::NOTHING,
             old_dataset,
-            new_dataset,
+            old_config,
             old_label,
+            new_dataset,
+            new_config,
             new_label,
             repeat_iou: 0.95,
         };
@@ -55,11 +64,7 @@ impl Relabeling {
             ui.label("Progress");
             ui.add(DragValue::from_get_set(|new_pos| {
                 if let Some(new_pos) = new_pos {
-                    self.go(
-                        DatasetMovement::JumpTo(new_pos as usize),
-                        DatasetMovement::JumpTo(new_pos as usize),
-                        ctx,
-                    );
+                    self.go(DatasetMovement::JumpTo(new_pos as usize), ctx);
                 }
                 self.old_dataset.get_progress().1 as f64
             }));
@@ -84,10 +89,10 @@ impl Relabeling {
             ui.label(RichText::new(
                 "The highlighted box is ready to be remapped with these keybindings:",
             ));
-            ui.label(RichText::new("D: Diamond"));
             ui.label(RichText::new("H: Heart"));
-            ui.label(RichText::new("S: Spades"));
+            ui.label(RichText::new("D: Diamond"));
             ui.label(RichText::new("C: Clubs"));
+            ui.label(RichText::new("S: Spades"));
             ui.label(RichText::new("Clear (mapped) labels: Delete"));
             ui.label(RichText::new("Repeat previous labels: R"));
             ui.label(RichText::new("Go left or right: Left Arrow or Right Arrow"));
@@ -104,17 +109,17 @@ impl Relabeling {
         self.img_rect = img_response.rect;
         img_response
     }
-    pub fn draw_label_text<L: DatasetLabel>(&self, painter: &Painter, text_pos: Pos2, class: L) {
+    pub fn draw_label_text(&self, painter: &Painter, text_pos: Pos2, class: DynLabel) {
         painter.rect(
             Rect::from_two_pos(text_pos, text_pos + [40.0, -35.0].into()),
             Rounding::none(),
-            class.color(),
+            class.color,
             Stroke::NONE,
         );
         let _text_rect = painter.text(
             text_pos,
             Align2::LEFT_BOTTOM,
-            class.to_name(),
+            class.name,
             FontId::monospace(35.0),
             Color32::BLACK,
         );
@@ -122,18 +127,18 @@ impl Relabeling {
     pub fn draw_bbs(&self, ui: &mut Ui) {
         let painter = ui.painter();
         for bb in self.old_label.iter() {
-            let color = bb.class().color();
+            let color = bb.class(&self.old_config).color;
             let screen_rect = bb.to_screen_rect(self.img_rect);
             painter.rect_stroke(screen_rect, Rounding::none(), Stroke::new(2.0, color));
             let text_pos = screen_rect.left_bottom();
-            self.draw_label_text(painter, text_pos, bb.class());
+            self.draw_label_text(painter, text_pos, bb.class(&self.old_config));
         }
         for bb in self.new_label.iter() {
-            let color = bb.class().color();
+            let color = bb.class(&self.new_config).color;
             let screen_rect = bb.to_screen_rect(self.img_rect);
             painter.rect_stroke(screen_rect, Rounding::none(), Stroke::new(2.0, color));
             let text_pos = screen_rect.left_top();
-            self.draw_label_text(painter, text_pos, bb.class());
+            self.draw_label_text(painter, text_pos, bb.class(&self.new_config));
         }
     }
     pub fn find_next_highlighted(&self) -> Option<usize> {
@@ -165,13 +170,9 @@ impl Relabeling {
         let image = self.old_dataset.current_image().unwrap();
         self.image_texture = ctx.load_texture("my-image", image, egui::TextureOptions::LINEAR);
     }
-    pub fn go(
-        &mut self,
-        move_old: DatasetMovement<DynLabel>,
-        move_new: DatasetMovement<CardSuit>,
-        ctx: &Context,
-    ) {
-        if move_old == DatasetMovement::Next && self.new_label.len() != self.old_label.len() {
+    pub fn go(&mut self, movement: DatasetMovement, ctx: &Context) {
+        // TODO actually check if labels match correctly, not only length
+        if movement == DatasetMovement::Next && self.new_label.len() != self.old_label.len() {
             println!(
                 "Missing labels: len new {} vs len old {}",
                 self.new_label.len(),
@@ -180,10 +181,10 @@ impl Relabeling {
             return;
         }
         self.old_dataset
-            .go(move_old, self.old_label.clone())
+            .go(movement.clone(), self.old_label.clone())
             .unwrap();
         self.new_dataset
-            .go(move_new, self.new_label.clone())
+            .go(movement, self.new_label.clone())
             .unwrap();
         self.old_label = self.old_dataset.current_label().unwrap();
         self.new_label = self.new_dataset.current_label().unwrap();
@@ -194,15 +195,15 @@ impl Relabeling {
         let next_pressed = ctx.input(|i| i.key_pressed(egui::Key::ArrowRight));
         let previous_pressed = ctx.input(|i| i.key_pressed(egui::Key::ArrowLeft));
 
-        let (move_old, move_new) = match (next_pressed, previous_pressed) {
-            (true, false) => (DatasetMovement::Next, DatasetMovement::Next),
-            (false, true) => (DatasetMovement::Previous, DatasetMovement::Previous),
+        let movement = match (next_pressed, previous_pressed) {
+            (true, false) => DatasetMovement::Next,
+            (false, true) => DatasetMovement::Previous,
             _ => return,
         };
 
-        // TODO this is not good code...
-        self.go(move_old.clone(), move_new, ctx);
-        if move_old == DatasetMovement::Next && self.new_label.is_empty() {
+        // TODO fix this clone... weird code
+        self.go(movement.clone(), ctx);
+        if movement == DatasetMovement::Next && self.new_label.is_empty() {
             self.repeat_bbs().unwrap();
         }
     }
@@ -213,39 +214,49 @@ impl Relabeling {
         }
         self.highlighted = self.find_next_highlighted();
     }
-    fn new_class_pressed(&self, ctx: &Context) -> Option<Suit> {
+    fn new_class_pressed(&self, ctx: &Context) -> Option<usize> {
+        // TODO fix this
         ctx.input(|i| {
-            Suit::keys_to_class(
-                i.keys_down
-                    .clone()
-                    .into_iter()
-                    .filter(|key| i.key_pressed(*key))
-                    .collect(),
-            )
+            if i.key_pressed(Key::H) {
+                Some(0)
+            } else if i.key_pressed(Key::D) {
+                Some(1)
+            } else if i.key_pressed(Key::C) {
+                Some(2)
+            } else if i.key_pressed(Key::S) {
+                Some(3)
+            } else {
+                None
+            }
         })
     }
 
     pub fn handle_class_keys(&mut self, ctx: &Context) {
-        if let (Some(suit), Some(highlighted)) = (self.new_class_pressed(ctx), self.highlighted) {
+        if let (Some(suit_usize), Some(highlighted)) =
+            (self.new_class_pressed(ctx), self.highlighted)
+        {
             let old_bbx = self.old_label[highlighted];
-            let class = old_bbx.class();
-            let card = Card::from_usize(class.0);
-            let new_class = CardSuit(card, suit);
-            let new_bbs = BoundingBox::from_rect(
+            // let class = old_bbx.class(&self.old_config);
+            // let card = Card::from_usize(class.0);
+            let new_class = self
+                .new_config
+                .label_from_usize(suit_usize * 13 + old_bbx.class(&self.old_config).i)
+                .expect("Remap issue, usize to high");
+            // let new_class = CardSuit(card, suit);
+            let new_bbs = YoloBB::from_rect(
                 old_bbx.to_screen_rect(self.img_rect),
                 self.img_rect,
-                new_class,
+                &new_class,
             );
             self.new_label.push(new_bbs);
             self.highlighted = self.find_next_highlighted();
             while self.new_label.len() == self.old_label.len() && self.highlighted.is_none() {
-                let (move_old, move_new) = (DatasetMovement::Next, DatasetMovement::Next);
-                self.go(move_old, move_new, ctx);
+                self.go(DatasetMovement::Next, ctx);
                 self.repeat_bbs().unwrap();
             }
         }
     }
-    pub fn take_similar_bbs(&mut self, new_label_candidates: Vec<YoloLabel<CardSuit>>) {
+    pub fn take_similar_bbs(&mut self, new_label_candidates: Vec<YoloLabel>) {
         self.new_label = vec![];
         for old_bbs in self.old_label.iter() {
             for new_bbs in new_label_candidates.iter().flatten() {
@@ -255,8 +266,11 @@ impl Relabeling {
                 let union = old_rect.union(new_rect).area();
                 let iou = intersect / union;
                 if iou > self.repeat_iou {
-                    let new_label =
-                        BoundingBox::from_rect(old_rect, self.img_rect, new_bbs.class());
+                    let new_label = YoloBB::from_rect(
+                        old_rect,
+                        self.img_rect,
+                        &new_bbs.class(&self.new_config),
+                    );
                     self.new_label.push(new_label);
                     break;
                 }

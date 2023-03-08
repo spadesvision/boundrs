@@ -7,7 +7,7 @@ use std::{
 };
 
 mod dataset;
-use dataset::{BoundingBox, Dataset, DatasetLabel, DatasetMovement, DynLabel, YoloBB, YoloLabel};
+use dataset::{Dataset, DatasetMovement, DynLabel, DynLabelConfig, YoloBB, YoloLabel};
 use image::{Rgba, RgbaImage};
 
 mod relabeling;
@@ -23,10 +23,16 @@ struct Args {
     data_dir: PathBuf,
 
     #[arg(long, default_value = "")]
-    prefix_old: String,
+    prefix: String,
 
     #[arg(long, default_value = "new_")]
-    prefix_new: String,
+    prefix_relabel: String,
+
+    #[arg(long, default_value = "./labels_13.toml")]
+    config: PathBuf,
+
+    #[arg(long, default_value = "./labels_52.toml")]
+    config_relabel: PathBuf,
 }
 #[derive(PartialEq, Debug)]
 enum Mode {
@@ -57,7 +63,8 @@ enum BBoxInput {
 }
 
 struct Labeling {
-    dataset: Dataset<DynLabel>,
+    dataset: Dataset,
+    label_config: DynLabelConfig,
     zoom: f32,
     // TODO move this to main app, pass new texture out of label / relabel function
     image_texture: egui::TextureHandle,
@@ -67,33 +74,36 @@ struct Labeling {
     current_class: DynLabel,
     filter: bool,
     filter_opacity: u8,
-    shown_classes: HashSet<DynLabel>,
-    current_label: YoloLabel<DynLabel>,
+    shown_classes: HashSet<usize>,
+    last_time: f64,
+    current_label: YoloLabel,
 }
 
 impl Labeling {
-    fn new(cc: &Context, dataset_dir: &Path, prefix: &str) -> Self {
-        let ppp = cc.pixels_per_point();
-        println!("Current pixels per point {ppp}");
-        // cc.set_pixels_per_point(2.0);
+    fn new(cc: &Context, dataset_dir: &Path, prefix: &str, label_config: DynLabelConfig) -> Self {
         let shown_classes = HashSet::new();
         let dataset = Dataset::with_prefix(dataset_dir, prefix).unwrap();
         let image = dataset.current_image().unwrap();
         let image_texture = cc.load_texture("my-image", image, egui::TextureOptions::LINEAR);
         let current_bbs = dataset.current_label().unwrap();
+        let current_class = label_config
+            .label_from_usize(0)
+            .expect("At least 1 label is needed");
         let mask = generate_mask(&current_bbs, &shown_classes, Rect::NOTHING, 250);
         let mask_texture = cc.load_texture("mask", mask, egui::TextureOptions::LINEAR);
         Labeling {
             dataset,
+            label_config,
             zoom: 1.0,
             image_texture,
             mask_texture,
             img_rect: Rect::NOTHING,
             bbox_input: BBoxInput::None,
-            current_class: DynLabel(0),
+            current_class,
             filter: false,
             filter_opacity: 250,
             shown_classes: HashSet::new(),
+            last_time: 0.0,
             current_label: current_bbs,
         }
     }
@@ -124,7 +134,13 @@ impl Labeling {
         });
         ui.horizontal(|ui| {
             ui.label("Shown classes:");
-            ui.label(format!("{:?}", self.shown_classes));
+            let classes: HashSet<String> = self
+                .shown_classes
+                .iter()
+                .map(|u| self.label_config.label_from_usize(*u).unwrap())
+                .map(|l| l.name)
+                .collect();
+            ui.label(format!("{classes:?}"));
         });
         ui.horizontal(|ui| {
             ui.label("Zoom image:");
@@ -133,14 +149,9 @@ impl Labeling {
         ui.vertical(|ui| {
             ui.separator();
             ui.label(RichText::new("How to use").heading());
-            ui.label(RichText::new("Choos the active label with:"));
-            ui.label(RichText::new("1: Ace"));
-            ui.label(RichText::new("2: 2"));
-            ui.label(RichText::new("..."));
-            ui.label(RichText::new("0: 10"));
-            ui.label(RichText::new("J: J"));
-            ui.label(RichText::new("Q: Q"));
-            ui.label(RichText::new("K: K"));
+            ui.label(RichText::new(
+                "Choose the active label as with the keybindings as in the config file",
+            ));
             ui.label(RichText::new("Create label by clicking twice or dragging"));
             ui.label(RichText::new("Delete labels with a right click"));
             ui.label(RichText::new("Repeat previous labels: R"));
@@ -179,7 +190,7 @@ impl Labeling {
         self.current_label
             .retain(|label| !label.to_screen_rect(img_rect).contains(pos));
     }
-    pub fn add_bb(&mut self, bb: YoloBB<DynLabel>) {
+    pub fn add_bb(&mut self, bb: YoloBB) {
         self.current_label.push(bb)
     }
 
@@ -196,22 +207,22 @@ impl Labeling {
         let painter = ui.painter();
         // let size = self.img_rect.size();
         for bb in &self.current_label {
-            let color = bb.class().color();
+            let color = bb.class(&self.label_config).color;
             let screen_rect = bb.to_screen_rect(img_rect);
             painter.rect_stroke(screen_rect, Rounding::none(), Stroke::new(2.0, color));
             let text_pos = screen_rect.left_bottom();
-            self.draw_label_text(painter, text_pos, bb.class());
+            self.draw_label_text(painter, text_pos, &bb.class(&self.label_config));
         }
     }
     fn draw_guide(&self, ui: &mut Ui, pos: Pos2) {
         let painter = ui.painter();
         let rect = ui.clip_rect();
         let w_size = rect.size();
-        let color = self.current_class.color();
+        let color = self.current_class.color;
         let stroke = egui::Stroke::new(2.0, color);
         painter.hline(0.0..=w_size.x, pos.y, stroke);
         painter.vline(pos.x, 0.0..=w_size.y, stroke);
-        self.draw_label_text(painter, pos, self.current_class);
+        self.draw_label_text(painter, pos, &self.current_class);
     }
     fn draw_partial_box(&self, ui: &mut Ui) {
         if let BBoxInput::Partial(pos) = self.bbox_input {
@@ -219,17 +230,17 @@ impl Labeling {
             self.draw_guide(ui, pos);
         }
     }
-    fn draw_label_text(&self, painter: &Painter, text_pos: Pos2, class: DynLabel) {
+    fn draw_label_text(&self, painter: &Painter, text_pos: Pos2, class: &DynLabel) {
         painter.rect(
             Rect::from_two_pos(text_pos, text_pos + [40.0, -35.0].into()),
             Rounding::none(),
-            class.color(),
+            class.color,
             Stroke::NONE,
         );
         let _text_rect = painter.text(
             text_pos,
             Align2::LEFT_BOTTOM,
-            class.to_name(),
+            &class.name,
             FontId::monospace(35.0),
             Color32::BLACK,
         );
@@ -262,10 +273,9 @@ impl Labeling {
             }
             BBoxInput::Partial(pos1) => BBoxInput::Partial(pos1),
             BBoxInput::Finished(pos1, pos2) => {
-                let class = self.current_class;
                 let img_rect = img_response.rect;
                 let label_rect = Rect::from_two_pos(pos1, pos2);
-                let label = YoloBB::from_rect(label_rect, img_rect, class);
+                let label = YoloBB::from_rect(label_rect, img_rect, &self.current_class);
                 println!("{label:?}");
                 self.add_bb(label);
                 self.update_mask(ui.ctx());
@@ -274,19 +284,34 @@ impl Labeling {
         };
     }
     fn class_pressed(&self, ctx: &Context) -> Option<DynLabel> {
-        ctx.input(|i| DynLabel::keys_to_class(i.keys_down.clone()))
+        // for (i, keys) in self.label_config.keybindings().into_iter().enumerate() {
+        //     if keys.iter().all(|k| ctx.input(|i| i.key_down(*k))) {
+        //         // consume all keys
+        //         keys.iter()
+        //             .all(|key| ctx.input_mut(|i| i.consume_key(Modifiers::NONE, *key)));
+        //         let label = self.label_config.label_from_usize(i).unwrap();
+        //         return Some(label);
+        //     }
+        // }
+        // None
+        if ctx.input(|i| i.time - self.last_time > 0.3) {
+            return ctx.input(|i| self.label_config.label_from_keys(&i.keys_down));
+        }
+        None
     }
 
     fn handle_class_keys(&mut self, ctx: &Context) {
         if let Some(class) = self.class_pressed(ctx) {
+            self.last_time = ctx.input(|i| i.time);
             if self.filter {
-                if self.shown_classes.contains(&class) {
-                    self.shown_classes.remove(&class);
+                if self.shown_classes.contains(&class.i) {
+                    self.shown_classes.remove(&class.i);
                 } else {
-                    self.shown_classes.insert(class);
+                    self.shown_classes.insert(class.i);
                 }
+                self.update_mask(ctx);
             } else {
-                self.current_class = class;
+                self.current_class = class.clone();
             }
         }
     }
@@ -306,7 +331,7 @@ impl Labeling {
         self.dataset_move(movement, ctx);
     }
 
-    fn dataset_move(&mut self, movement: DatasetMovement<DynLabel>, ctx: &Context) {
+    fn dataset_move(&mut self, movement: DatasetMovement, ctx: &Context) {
         self.dataset
             .go(movement, self.current_label.clone())
             .unwrap();
@@ -343,10 +368,10 @@ impl Boundrs {
                 Mode::Label => {
                     let (_, current_pos, _) = self.label.dataset.get_progress();
                     let label_move = DatasetMovement::JumpTo(current_pos);
-                    let relabel_old_move = DatasetMovement::JumpTo(current_pos);
-                    let relabel_new_move = DatasetMovement::JumpTo(current_pos);
-                    self.relabel.go(relabel_old_move, relabel_new_move, ctx); // move relabel dataset
+                    let relabel_move = DatasetMovement::JumpTo(current_pos);
+                    self.relabel.go(relabel_move, ctx); // move relabel dataset
 
+                    // TODO fix this
                     self.label.dataset_move(label_move, ctx); // This saves currentl label to disk
                     self.relabel.old_label = self.label.current_label.clone(); // override relabels old_label
                     self.relabel.highlighted = self.relabel.find_next_highlighted(); // If we removed the highlighted, it would crash if we dont update this... refactor
@@ -354,12 +379,12 @@ impl Boundrs {
                 }
                 Mode::Relabel => {
                     // let (_, current_pos, _) = self.relabel.old_dataset.get_progress();
+                    // TODO fix this
                     let (_, current_pos, _) = self.relabel.old_dataset.get_progress();
                     let label_move = DatasetMovement::JumpTo(current_pos);
-                    let relabel_old_move = DatasetMovement::JumpTo(current_pos);
-                    let relabel_new_move = DatasetMovement::JumpTo(current_pos);
+                    let movement = DatasetMovement::JumpTo(current_pos);
                     self.label.dataset_move(label_move, ctx); // move label dataset
-                    self.relabel.go(relabel_old_move, relabel_new_move, ctx); // save relabels old_label and new_label
+                    self.relabel.go(movement, ctx); // save relabels old_label and new_label
 
                     self.label.current_label = self.relabel.old_label.clone(); // override labels current_label
                     Mode::Label
@@ -369,12 +394,20 @@ impl Boundrs {
     }
 
     fn new(cc: &CreationContext, args: Args) -> Self {
-        let label_state = Labeling::new(&cc.egui_ctx, &args.data_dir, &args.prefix_old);
+        let label_config = DynLabelConfig::load_from_file(&args.config)
+            .expect("./labels.toml should exists as described in github repo");
+        let label_state = Labeling::new(&cc.egui_ctx, &args.data_dir, &args.prefix, label_config);
+        let label_config = DynLabelConfig::load_from_file(&args.config)
+            .expect("./labels.toml should exists as described in github repo");
+        let relabel_config = DynLabelConfig::load_from_file(&args.config_relabel)
+            .expect("./labels.toml should exists as described in github repo");
         let relabel_state = Relabeling::new(
             &cc.egui_ctx,
             &args.data_dir,
-            &args.prefix_old,
-            &args.prefix_new,
+            &args.prefix,
+            &args.prefix_relabel,
+            label_config,
+            relabel_config,
         );
 
         Self {
@@ -386,21 +419,21 @@ impl Boundrs {
 }
 
 #[inline]
-fn pos_inside_label_box(label: &YoloLabel<DynLabel>, pos: Pos2, img_rect: Rect) -> bool {
+fn pos_inside_label_box(label: &YoloLabel, pos: Pos2, img_rect: Rect) -> bool {
     label
         .iter()
         .any(|l| l.to_screen_rect(img_rect).contains(pos))
 }
 fn generate_mask(
-    label: &YoloLabel<DynLabel>,
-    shown_classes: &HashSet<DynLabel>,
+    label: &YoloLabel,
+    shown_classes: &HashSet<usize>,
     img_rect: Rect,
     opacity: u8,
 ) -> ColorImage {
     let highlighted_label = label
         .iter()
         .cloned()
-        .filter(|bb| shown_classes.contains(&bb.class()))
+        .filter(|bb| shown_classes.contains(&bb.class_num))
         .collect();
     let width = img_rect.width() as usize;
     let height = img_rect.height() as usize;
