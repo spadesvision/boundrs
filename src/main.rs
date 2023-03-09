@@ -94,7 +94,7 @@ impl Labeling {
         Labeling {
             dataset,
             label_config,
-            zoom: 1.0,
+            zoom: 1.8,
             image_texture,
             mask_texture,
             img_rect: Rect::NOTHING,

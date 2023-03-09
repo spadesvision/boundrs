@@ -40,7 +40,7 @@ impl Relabeling {
         let highlighted = None;
         let mut relabeling = Relabeling {
             highlighted,
-            zoom: 1.0,
+            zoom: 1.8,
             image_texture,
             img_rect: Rect::NOTHING,
             old_dataset,
@@ -49,7 +49,7 @@ impl Relabeling {
             new_dataset,
             new_config,
             new_label,
-            repeat_iou: 0.95,
+            repeat_iou: 0.87,
         };
         relabeling.highlighted = relabeling.find_next_highlighted();
         relabeling
