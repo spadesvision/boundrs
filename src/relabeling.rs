@@ -265,7 +265,8 @@ impl Relabeling {
                 let intersect = old_rect.intersect(new_rect).area();
                 let union = old_rect.union(new_rect).area();
                 let iou = intersect / union;
-                if iou > self.repeat_iou {
+                // TODO generalize, probably from config
+                if iou > self.repeat_iou && old_bbs.class_num == new_bbs.class_num % 13 {
                     let new_label = YoloBB::from_rect(
                         old_rect,
                         self.img_rect,
@@ -278,7 +279,7 @@ impl Relabeling {
         }
     }
     pub fn repeat_bbs(&mut self) -> Result<()> {
-        let previous_labels = self.new_dataset.previous_labels(3)?;
+        let previous_labels = self.new_dataset.previous_labels(2)?;
         self.take_similar_bbs(previous_labels);
         self.highlighted = self.find_next_highlighted();
         Ok(())
