@@ -267,7 +267,8 @@ impl Dataset {
     pub fn from_input_dir(labels_dir: &Path) -> Result<Self> {
         let mut data = vec![];
         // let labels_dir = PathBuf::from("./input");
-        let mut paths: Vec<_> = glob("./input/*.jpg")?.filter_map(Result::ok).collect();
+        let jpg_glob = format!("{}/*.jpg", labels_dir.to_str().unwrap());
+        let mut paths: Vec<_> = glob(&jpg_glob)?.filter_map(Result::ok).collect();
         alphanumeric_sort::sort_path_slice(&mut paths);
         for img_src in paths.into_iter() {
             data.push(Datapoint::new(img_src, labels_dir.to_path_buf()))
