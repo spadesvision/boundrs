@@ -282,7 +282,7 @@ impl Labeling {
             BBoxInput::Partial(pos1) if img_response.drag_released() => {
                 let pos2 = img_response.interact_pointer_pos().unwrap();
                 // sometimes you drag a tiny amount without wanting to
-                if (pos2.x - pos1.x).abs() < 5.0 || (pos2.y - pos1.y).abs() < 5.0 {
+                if (pos2.x - pos1.x).abs() < 20.0 || (pos2.y - pos1.y).abs() < 20.0 {
                     BBoxInput::Partial(pos1)
                 } else {
                     BBoxInput::Finished(pos1, pos2)
