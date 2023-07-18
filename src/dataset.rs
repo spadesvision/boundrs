@@ -312,7 +312,6 @@ impl Dataset {
     }
     pub fn previous_labels(&self, num: usize) -> Result<Vec<YoloLabel>> {
         (1..=num)
-            .into_iter()
             .map(|back| {
                 let previous = self.i.saturating_sub(back);
                 self.data[previous].load_label()

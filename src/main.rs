@@ -71,6 +71,7 @@ struct Labeling {
     mask_texture: egui::TextureHandle,
     img_rect: Rect,
     bbox_input: BBoxInput,
+    repeat_mode: bool,
     current_class: DynLabel,
     filter: bool,
     filter_opacity: u8,
@@ -99,6 +100,7 @@ impl Labeling {
             mask_texture,
             img_rect: Rect::NOTHING,
             bbox_input: BBoxInput::None,
+            repeat_mode: false,
             current_class,
             filter: false,
             filter_opacity: 250,
@@ -194,9 +196,19 @@ impl Labeling {
         self.current_label.push(bb)
     }
 
-    pub fn repeat_bbs(&mut self) -> Result<()> {
-        let yolo_label = self.dataset.previous_labels(1)?;
-        self.current_label = yolo_label[0].clone();
+    pub fn repeat_bbs_inside(&mut self, rect: Rect) -> Result<()> {
+        // get two coordinates to repeat only the labels completely in this box
+        let prev_label = self.dataset.previous_labels(1)?[0].clone();
+        let prev_label_inside = prev_label
+            .into_iter()
+            .filter(|l| rect.contains_rect(l.to_screen_rect(self.img_rect)));
+        self.current_label = self
+            .current_label
+            .clone()
+            .into_iter()
+            .filter(|l| !rect.contains_rect(l.to_screen_rect(self.img_rect)))
+            .chain(prev_label_inside)
+            .collect();
         Ok(())
     }
     fn remove_bbs(&mut self, pos: Pos2, img_rect: Rect) {
@@ -237,10 +249,15 @@ impl Labeling {
             class.color,
             Stroke::NONE,
         );
+        let text = if self.repeat_mode {
+            "Repeat region"
+        } else {
+            &class.name
+        };
         let _text_rect = painter.text(
             text_pos,
             Align2::LEFT_BOTTOM,
-            &class.name,
+            text,
             FontId::monospace(35.0),
             Color32::BLACK,
         );
@@ -282,6 +299,22 @@ impl Labeling {
                 BBoxInput::None
             }
         };
+        if let BBoxInput::Finished(pos1, pos2) = self.bbox_input {
+            if self.repeat_mode {
+                let rect = Rect::from_two_pos(pos1, pos2);
+                self.repeat_bbs_inside(rect).unwrap();
+                self.repeat_mode = false;
+                self.bbox_input = BBoxInput::None
+            } else {
+                let img_rect = img_response.rect;
+                let label_rect = Rect::from_two_pos(pos1, pos2);
+                let label = YoloBB::from_rect(label_rect, img_rect, &self.current_class);
+                println!("{label:?}");
+                self.add_bb(label);
+                self.update_mask(ui.ctx());
+                self.bbox_input = BBoxInput::None
+            }
+        }
     }
     fn class_pressed(&self, ctx: &Context) -> Option<DynLabel> {
         // for (i, keys) in self.label_config.keybindings().into_iter().enumerate() {
@@ -511,7 +544,7 @@ impl eframe::App for Boundrs {
 
                         // Handle repeat button
                         if ctx.input(|i| i.key_pressed(egui::Key::R)) {
-                            app.repeat_bbs().unwrap();
+                            app.repeat_mode = !app.repeat_mode;
                         }
                     }
                     Mode::Relabel => {
