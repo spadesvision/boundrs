@@ -58,8 +58,8 @@ fn main() {
 #[derive(Debug, Clone, Copy)]
 enum BBoxInput {
     None,
-    Partial(Pos2),
-    Finished(Pos2, Pos2),
+    First(Pos2),
+    Second(Pos2, Pos2),
 }
 
 struct Labeling {
@@ -236,10 +236,22 @@ impl Labeling {
         painter.vline(pos.x, 0.0..=w_size.y, stroke);
         self.draw_label_text(painter, pos, &self.current_class);
     }
-    fn draw_partial_box(&self, ui: &mut Ui) {
-        if let BBoxInput::Partial(pos) = self.bbox_input {
+    fn draw_partial_box(&self, ui: &mut Ui, ctx: &Context) {
+        let painter = ui.painter();
+        let color = self.current_class.color;
+        let stroke = egui::Stroke::new(2.0, color);
+        if let BBoxInput::First(pos) = self.bbox_input {
             // let screen_pos = self.img_to_screen_coordinates(pos);
-            self.draw_guide(ui, pos);
+            if let Some(pointer) = ctx.input(|i| i.pointer.hover_pos()) {
+                painter.line_segment([pos, pointer], stroke);
+            }
+        }
+        if let BBoxInput::Second(pos1, pos2) = self.bbox_input {
+            // let screen_pos = self.img_to_screen_coordinates(pos);
+            painter.line_segment([pos1, pos2], stroke);
+            if let Some(pointer) = ctx.input(|i| i.pointer.hover_pos()) {
+                painter.line_segment([pos2, pointer], stroke);
+            }
         }
     }
     fn draw_label_text(&self, painter: &Painter, text_pos: Pos2, class: &DynLabel) {
@@ -276,20 +288,26 @@ impl Labeling {
         self.bbox_input = match self.bbox_input {
             BBoxInput::None if img_response.drag_started() => {
                 let screen_pos = img_response.interact_pointer_pos().unwrap();
-                BBoxInput::Partial(screen_pos)
+                BBoxInput::First(screen_pos)
             }
             BBoxInput::None => BBoxInput::None,
-            BBoxInput::Partial(pos1) if img_response.drag_released() => {
+            BBoxInput::First(pos1) if img_response.drag_released() => {
                 let pos2 = img_response.interact_pointer_pos().unwrap();
                 // sometimes you drag a tiny amount without wanting to
-                if (pos2.x - pos1.x).abs() < 20.0 || (pos2.y - pos1.y).abs() < 20.0 {
-                    BBoxInput::Partial(pos1)
+                if self.repeat_mode {
+                    let rect = Rect::from_two_pos(pos1, pos2);
+                    self.repeat_bbs_inside(rect).unwrap();
+                    self.repeat_mode = false;
+                    BBoxInput::None
+                } else if (pos2.x - pos1.x).abs() < 20.0 || (pos2.y - pos1.y).abs() < 20.0 {
+                    BBoxInput::First(pos1)
                 } else {
-                    BBoxInput::Finished(pos1, pos2)
+                    BBoxInput::Second(pos1, pos2)
                 }
             }
-            BBoxInput::Partial(pos1) => BBoxInput::Partial(pos1),
-            BBoxInput::Finished(pos1, pos2) => {
+            BBoxInput::First(pos1) => BBoxInput::First(pos1),
+            BBoxInput::Second(pos1, pos2) if img_response.drag_released() => {
+                let pos3 = img_response.interact_pointer_pos().unwrap();
                 let img_rect = img_response.rect;
                 let label_rect = Rect::from_two_pos(pos1, pos2);
                 let label = YoloBB::from_rect(label_rect, img_rect, &self.current_class);
@@ -298,23 +316,8 @@ impl Labeling {
                 self.update_mask(ui.ctx());
                 BBoxInput::None
             }
+            BBoxInput::Second(pos1, pos2) => BBoxInput::Second(pos1, pos2),
         };
-        if let BBoxInput::Finished(pos1, pos2) = self.bbox_input {
-            if self.repeat_mode {
-                let rect = Rect::from_two_pos(pos1, pos2);
-                self.repeat_bbs_inside(rect).unwrap();
-                self.repeat_mode = false;
-                self.bbox_input = BBoxInput::None
-            } else {
-                let img_rect = img_response.rect;
-                let label_rect = Rect::from_two_pos(pos1, pos2);
-                let label = YoloBB::from_rect(label_rect, img_rect, &self.current_class);
-                println!("{label:?}");
-                self.add_bb(label);
-                self.update_mask(ui.ctx());
-                self.bbox_input = BBoxInput::None
-            }
-        }
     }
     fn class_pressed(&self, ctx: &Context) -> Option<DynLabel> {
         // for (i, keys) in self.label_config.keybindings().into_iter().enumerate() {
@@ -524,7 +527,7 @@ impl eframe::App for Boundrs {
                         if let Some(pos) = pos {
                             app.draw_guide(ui, pos)
                         }
-                        app.draw_partial_box(ui);
+                        app.draw_partial_box(ui, ctx);
 
                         // Draw bbs
                         app.draw_bbs(ui);
