@@ -1,4 +1,4 @@
-use std::path::Path;
+use std::{ops::IndexMut, path::Path};
 
 use anyhow::Result;
 use eframe::egui;
@@ -141,8 +141,9 @@ impl Relabeling {
             self.draw_label_text(painter, text_pos, bb.class(&self.new_config));
         }
     }
-    pub fn find_next_highlighted(&self) -> Option<usize> {
+    pub fn find_next_highlighted(&mut self) -> Option<usize> {
         // let size = self.img_rect.size();
+        self.old_label.sort_by(|a, b| a.x.total_cmp(&b.x));
         for (i, old_bbs) in self.old_label.iter().enumerate() {
             if self.new_label.iter().all(|new_bbs| {
                 let old_rect = old_bbs.to_screen_rect(self.img_rect);

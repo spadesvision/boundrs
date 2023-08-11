@@ -114,7 +114,7 @@ pub type YoloLabel = Vec<YoloBB>;
 #[derive(Debug, Clone, Copy)]
 pub struct YoloBB {
     pub class_num: usize,
-    x: f32,
+    pub x: f32,
     y: f32,
     w: f32,
     h: f32,
