@@ -364,8 +364,10 @@ impl Dataset {
         Ok(())
     }
 
-    pub fn go(&mut self, movement: DatasetMovement, label: YoloLabel) -> Result<()> {
-        self.save_label(label)?;
+    pub fn go(&mut self, movement: DatasetMovement, label: YoloLabel, save: bool) -> Result<()> {
+        if save {
+            self.save_label(label)?;
+        }
         match movement {
             DatasetMovement::Next => self.next(),
             DatasetMovement::Previous => self.previous(),

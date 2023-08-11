@@ -40,7 +40,7 @@ impl Relabeling {
         let highlighted = None;
         let mut relabeling = Relabeling {
             highlighted,
-            zoom: 1.8,
+            zoom: 1.5,
             image_texture,
             img_rect: Rect::NOTHING,
             old_dataset,
@@ -181,10 +181,10 @@ impl Relabeling {
             return;
         }
         self.old_dataset
-            .go(movement.clone(), self.old_label.clone())
+            .go(movement.clone(), self.old_label.clone(), false)
             .unwrap();
         self.new_dataset
-            .go(movement, self.new_label.clone())
+            .go(movement, self.new_label.clone(), true)
             .unwrap();
         self.old_label = self.old_dataset.current_label().unwrap();
         self.new_label = self.new_dataset.current_label().unwrap();

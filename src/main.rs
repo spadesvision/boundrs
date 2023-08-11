@@ -95,7 +95,7 @@ impl Labeling {
         Labeling {
             dataset,
             label_config,
-            zoom: 1.8,
+            zoom: 1.5,
             image_texture,
             mask_texture,
             img_rect: Rect::NOTHING,
@@ -366,7 +366,7 @@ impl Labeling {
 
     fn dataset_move(&mut self, movement: DatasetMovement, ctx: &Context) {
         self.dataset
-            .go(movement, self.current_label.clone())
+            .go(movement, self.current_label.clone(), true)
             .unwrap();
         self.current_label = self.dataset.current_label().unwrap();
         self.update_texture(ctx);
