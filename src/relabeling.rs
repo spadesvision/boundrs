@@ -1,4 +1,4 @@
-use std::{ops::IndexMut, path::Path};
+use std::path::Path;
 
 use anyhow::Result;
 use eframe::egui;
@@ -20,6 +20,7 @@ pub struct Relabeling {
     pub old_label: YoloLabel,
     new_label: YoloLabel,
     repeat_iou: f32,
+    auto_repeat: bool,
 }
 
 impl Relabeling {
@@ -50,6 +51,7 @@ impl Relabeling {
             new_config,
             new_label,
             repeat_iou: 0.87,
+            auto_repeat: true,
         };
         relabeling.highlighted = relabeling.find_next_highlighted();
         relabeling
@@ -82,6 +84,7 @@ impl Relabeling {
         ui.horizontal(|ui| {
             ui.label("Repeat iou:");
             ui.add(DragValue::new(&mut self.repeat_iou).speed(0.01));
+            ui.checkbox(&mut self.auto_repeat, "Auto repeat")
         });
         ui.vertical(|ui| {
             ui.separator();
@@ -251,11 +254,12 @@ impl Relabeling {
             );
             self.new_label.push(new_bbs);
             self.highlighted = self.find_next_highlighted();
-            while self.new_label.len() == self.old_label.len() && self.highlighted.is_none() {
+            while self.new_label.len() == self.old_label.len()
+                && self.highlighted.is_none()
+                && self.auto_repeat
+            {
                 self.go(DatasetMovement::Next, ctx);
-                if self.new_label.is_empty() {
-                    self.repeat_bbs().unwrap();
-                }
+                self.repeat_bbs().unwrap();
             }
         }
     }
