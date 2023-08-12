@@ -253,7 +253,9 @@ impl Relabeling {
             self.highlighted = self.find_next_highlighted();
             while self.new_label.len() == self.old_label.len() && self.highlighted.is_none() {
                 self.go(DatasetMovement::Next, ctx);
-                self.repeat_bbs().unwrap();
+                if self.new_label.is_empty() {
+                    self.repeat_bbs().unwrap();
+                }
             }
         }
     }
