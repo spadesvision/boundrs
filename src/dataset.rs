@@ -1,5 +1,5 @@
-use crate::egui::*;
 use anyhow::{anyhow, Error, Result};
+use eframe::egui::*;
 use glob::glob;
 use lazy_static::lazy_static;
 use serde::Deserialize;
@@ -321,6 +321,9 @@ impl Dataset {
     pub fn current_name(&self) -> String {
         self.data[self.i].name()
     }
+    pub fn current_path(&self) -> String {
+        self.data[self.i].label_src.to_str().unwrap().into()
+    }
     pub fn get_progress(&self) -> (usize, usize, usize) {
         (0, self.i, self.data.len())
     }
@@ -364,6 +367,7 @@ impl Dataset {
         Ok(())
     }
 
+    // TOD take Option for label instead of save flag
     pub fn go(&mut self, movement: DatasetMovement, label: YoloLabel, save: bool) -> Result<()> {
         if save {
             self.save_label(label)?;

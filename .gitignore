@@ -1,5 +1,8 @@
 /target
 
+data*
+backup
+
 input
 **.jpg
 **.txt
@@ -7,3 +10,6 @@ input
 flamegraph.svg
 perf.data
 perf.data.old
+
+*.tar
+*.tar.gz

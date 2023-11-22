@@ -6,12 +6,10 @@ use std::{
     path::{Path, PathBuf},
 };
 
-mod dataset;
-use dataset::{Dataset, DatasetMovement, DynLabel, DynLabelConfig, YoloBB, YoloLabel};
+use boundrs::dataset::{Dataset, DatasetMovement, DynLabel, DynLabelConfig, YoloBB, YoloLabel};
 use image::{Rgba, RgbaImage};
 
-mod relabeling;
-use relabeling::Relabeling;
+use boundrs::relabeling::Relabeling;
 
 use clap::Parser;
 
@@ -136,12 +134,14 @@ impl Labeling {
         });
         ui.horizontal(|ui| {
             ui.label("Shown classes:");
-            let classes: HashSet<String> = self
+            // TODO sort this by enum order and properly implement display or smth
+            let mut classes: Vec<String> = self
                 .shown_classes
                 .iter()
                 .map(|u| self.label_config.label_from_usize(*u).unwrap())
                 .map(|l| l.name)
                 .collect();
+            classes.sort();
             ui.label(format!("{classes:?}"));
         });
         ui.horizontal(|ui| {
