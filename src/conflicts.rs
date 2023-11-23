@@ -1,57 +1,72 @@
 use anyhow::Result;
-use eframe::{egui, CreationContext};
+use eframe::egui;
 use egui::*;
 use std::{
-    collections::{HashMap, HashSet},
+    collections::HashSet,
+    fs,
     path::{Path, PathBuf},
     str::FromStr,
 };
 
-use boundrs::dataset::{Dataset, DatasetMovement, DynLabel, DynLabelConfig, YoloBB, YoloLabel};
+use crate::{
+    dataset::{Dataset, DatasetMovement, DynLabel, DynLabelConfig, YoloBB, YoloLabel},
+    SyncDatasets,
+};
 use image::{Rgba, RgbaImage};
 
-use clap::Parser;
+// use clap::Parser;
 
-/// Simple program to greet a person
-#[derive(Parser, Debug)]
-#[command(author, version, about, long_about = None)]
-struct Args {
-    #[arg(short, long)]
-    gt_dir: PathBuf,
+// /// Simple program to greet a person
+// #[derive(Parser, Debug)]
+// #[command(author, version, about, long_about = None)]
+// struct Args {
+//     #[arg(short, long)]
+//     gt_dir: PathBuf,
 
-    #[clap(short, long, value_parser, num_args = 1.., value_delimiter = ' ')]
-    pred_dirs: Vec<PathBuf>,
+//     #[clap(short, long, value_parser, num_args = 1.., value_delimiter = ' ')]
+//     pred_dirs: Vec<PathBuf>,
 
-    #[arg(long, default_value = "./labels_52.toml")]
-    gt_config: PathBuf,
+//     #[arg(long, default_value = "./labels_52.toml")]
+//     gt_config: PathBuf,
 
-    #[clap(short, long, value_parser, num_args = 1.., value_delimiter = ' ')]
-    configs_pred: Vec<PathBuf>,
-}
-
-fn main() {
-    let args = Args::parse();
-    let options = eframe::NativeOptions {
-        initial_window_size: Some(egui::vec2(1920.0, 1080.0)),
-        ..Default::default()
-    };
-
-    eframe::run_native(
-        "Show an image with eframe/egui",
-        options,
-        Box::new(|cc| Box::new(BoundrsConflicts::new(cc, args))),
-    )
-    .unwrap();
-}
+//     #[clap(short, long, value_parser, num_args = 1.., value_delimiter = ' ')]
+//     configs_pred: Vec<PathBuf>,
+// }
 
 #[derive(Debug)]
 enum CurrentDataset {
     GroundTruth,
     Predicted(usize),
 }
+impl CurrentDataset {
+    fn to_usize(&self) -> usize {
+        match self {
+            CurrentDataset::GroundTruth => 0,
+            CurrentDataset::Predicted(i) => i + 1,
+        }
+    }
+    fn from_usize(i: usize) -> Self {
+        match i {
+            0 => CurrentDataset::GroundTruth,
+            i => CurrentDataset::Predicted(i - 1),
+        }
+    }
+    fn offset(&mut self, offset: i32, max_size: usize) {
+        let i = self.to_usize();
+        let new_i = (i as i32 + offset).rem_euclid(max_size as i32);
+        assert!(new_i >= 0);
+        *self = CurrentDataset::from_usize(new_i as usize);
+    }
+    fn pretty_print(&self, pred_dirs: &[PathBuf]) -> String {
+        match self {
+            CurrentDataset::GroundTruth => "Ground Truth".into(),
+            CurrentDataset::Predicted(i) => format!("Prediction in {:?}", pred_dirs[*i]),
+        }
+    }
+}
 
-struct Conflicts {
-    gt_dataset: Dataset,
+pub struct Conflicts {
+    pub gt_dataset: Dataset,
     gt_config: DynLabelConfig,
     // TODO store just the folder paths here and config in a separate dictionary
     pred_dirs: Vec<PathBuf>,
@@ -70,22 +85,40 @@ struct Conflicts {
 }
 
 impl Conflicts {
-    fn new(
+    pub fn from_dir<P: AsRef<Path>>(cc: &Context, dir: P) -> anyhow::Result<Self> {
+        let mut gt_dataset_dir = PathBuf::from(dir.as_ref());
+        gt_dataset_dir.push("normal");
+        let gt_config = DynLabelConfig::load_from_file("labels_52.toml").unwrap();
+
+        let mut pred_dirs = vec![];
+        let mut pred_confs = vec![];
+        for entry in fs::read_dir(dir).unwrap() {
+            let entry = entry?;
+            let subdir = entry.path();
+            if subdir.is_dir() {
+                pred_dirs.push(subdir);
+                pred_confs.push(DynLabelConfig::load_from_file("labels_52.toml").unwrap());
+            }
+        }
+
+        Conflicts::new(cc, &gt_dataset_dir, gt_config, pred_dirs, pred_confs)
+    }
+    pub fn new(
         cc: &Context,
         gt_dataset_dir: &Path,
         gt_config: DynLabelConfig,
         pred_dirs: Vec<PathBuf>,
         pred_confs: Vec<DynLabelConfig>,
-    ) -> Self {
+    ) -> anyhow::Result<Self> {
         let shown_classes = HashSet::new();
-        let gt_dataset = Dataset::from_input_dir(gt_dataset_dir).unwrap();
-        let image = gt_dataset.current_image().unwrap();
+        let gt_dataset = Dataset::from_input_dir(gt_dataset_dir)?;
+        let image = gt_dataset.current_image()?;
         let image_texture = cc.load_texture("my-image", image, egui::TextureOptions::LINEAR);
-        let current_bbs = gt_dataset.current_label().unwrap();
+        let current_bbs = gt_dataset.current_label()?;
         let mask = generate_mask(&current_bbs, &shown_classes, Rect::NOTHING, 250);
         let mask_texture = cc.load_texture("mask", mask, egui::TextureOptions::LINEAR);
 
-        Conflicts {
+        Ok(Conflicts {
             gt_dataset,
             gt_config,
             zoom: 1.5,
@@ -100,10 +133,7 @@ impl Conflicts {
             pred_dirs,
             pred_confs,
             current_dataset: CurrentDataset::GroundTruth,
-        }
-    }
-    fn get_current_dataset_mut(&mut self) -> &mut Dataset {
-        &mut self.gt_dataset
+        })
     }
     fn get_current_config(&self) -> &DynLabelConfig {
         match self.current_dataset {
@@ -111,14 +141,15 @@ impl Conflicts {
             CurrentDataset::Predicted(i) => &self.pred_confs[i],
         }
     }
-    fn draw_ui(&mut self, ui: &mut Ui, ctx: &Context) {
+    pub fn draw_ui(&mut self, ui: &mut Ui, ctx: &Context) {
         ui.horizontal(|ui| {
             let filename = self.gt_dataset.current_name();
             ui.label("Current image:");
             ui.label(filename);
-            let path = self.gt_dataset.current_path();
+        });
+        ui.horizontal(|ui| {
             ui.label("Current dataset:");
-            ui.label(format!("{:?}", self.current_dataset));
+            ui.label(self.current_dataset.pretty_print(&self.pred_dirs));
         });
         ui.horizontal(|ui| {
             ui.label("Progress");
@@ -296,112 +327,111 @@ impl Conflicts {
         self.update_texture(ctx);
         self.update_mask(ctx);
     }
-}
 
-struct BoundrsConflicts {
-    conflicts: Conflicts,
-}
-
-impl BoundrsConflicts {
-    // TODO error handling
-    // fn build_app(cc: &eframe::CreationContext<'_>) -> Box<dyn eframe::App> {
-    //     let label_state = Labeling::new(&cc.egui_ctx);
-    //     let relabel_state = Relabeling::new(&cc.egui_ctx);
-
-    //     Box::new(Self {
-    //         label: label_state,
-    //         relabel: relabel_state,
-    //         mode: Mode::Label,
-    //     })
-    // }
-
-    fn handle_mode_switch(&mut self, ctx: &Context) {
-        // We save the current label and update the state in the new mode
-        if ctx.input_mut(|i| i.consume_key(Modifiers::NONE, Key::Tab)) {
-            // TODO this desperately needs to be refactored. Maybe label and relabel as tools (not owning their datatsets), instead of apps
-
-            let mut existing_pred_indices = vec![0];
-            for (i, path) in self.conflicts.pred_dirs.iter().enumerate() {
-                let mut gt_name: PathBuf = self.conflicts.gt_dataset.current_name().into();
+    fn current_label(&mut self) -> Result<Option<YoloLabel>> {
+        let label = match self.current_dataset {
+            CurrentDataset::GroundTruth => self.gt_dataset.current_label()?,
+            CurrentDataset::Predicted(i) => {
+                // Here we know the file exists because of the code above
+                let mut gt_name: PathBuf = self.gt_dataset.current_name().into();
                 gt_name.set_extension("txt");
+                let path = &self.pred_dirs[i];
                 let mut label_file = path.clone();
-                label_file.push(&gt_name);
-                println!("checking {:?}", label_file);
-                if label_file.exists() {
-                    existing_pred_indices.push(i + 1) // to cycle through them, I put gt to 0
+                label_file.push(gt_name);
+                if !label_file.exists() {
+                    return Ok(None);
                 }
-            }
-            println!("{:?}", existing_pred_indices);
+                assert!(label_file.exists());
+                let yolo_strs = std::fs::read_to_string(label_file)?;
 
-            let current_index = match &self.conflicts.current_dataset {
-                CurrentDataset::GroundTruth => 0,
-                CurrentDataset::Predicted(i) => i + 1,
-            };
-            let closest_index = existing_pred_indices
-                .iter()
-                .min_by_key(|&&i| current_index.abs_diff(i))
-                .unwrap();
-            let pos_closest_index = existing_pred_indices
-                .iter()
-                .position(|i| i == closest_index)
-                .unwrap();
-            let new_pos = (pos_closest_index + 1) % existing_pred_indices.len();
-            let new_pos = existing_pred_indices[new_pos];
-
-            if new_pos == 0 {
-                self.conflicts.current_dataset = CurrentDataset::GroundTruth;
-            } else {
-                self.conflicts.current_dataset = CurrentDataset::Predicted(new_pos - 1);
-            }
-
-            // search through the dirs to find a conflicting file
-            // TODO generalize this code and move it into Conflicts
-            // TODO then the search can be made by recorsively calling this code
-            let label = match self.conflicts.current_dataset {
-                CurrentDataset::GroundTruth => self.conflicts.gt_dataset.current_label().unwrap(),
-                CurrentDataset::Predicted(i) => {
-                    // Here we know the file exists because of the code above
-                    let mut gt_name: PathBuf = self.conflicts.gt_dataset.current_name().into();
-                    gt_name.set_extension("txt");
-                    let path = &self.conflicts.pred_dirs[i];
-                    let mut label_file = path.clone();
-                    label_file.push(gt_name);
-                    assert!(label_file.exists());
-                    let yolo_strs = std::fs::read_to_string(label_file).unwrap();
-
-                    let mut labels = vec![];
-                    for line in yolo_strs.lines() {
-                        let label = YoloBB::from_str(line).unwrap();
-                        labels.push(label)
-                    }
-                    labels
+                let mut labels = vec![];
+                for line in yolo_strs.lines() {
+                    let label = YoloBB::from_str(line)?;
+                    labels.push(label)
                 }
+                labels
+            }
+        };
+        Ok(Some(label))
+    }
+
+    fn move_predicitions(&mut self, movement: PredictionMovement) {
+        let offset = match movement {
+            PredictionMovement::Next => 1,
+            PredictionMovement::Previous => -1,
+        };
+        self.current_dataset
+            .offset(offset, self.pred_dirs.len() + 1);
+        loop {
+            match self.current_label().unwrap() {
+                Some(label) => {
+                    self.current_label = label;
+                    break;
+                }
+                None => self
+                    .current_dataset
+                    .offset(offset, self.pred_dirs.len() + 1),
             };
-            self.conflicts.current_label = label;
         }
     }
-
-    fn new(cc: &CreationContext, args: Args) -> Self {
-        let gt_config = DynLabelConfig::load_from_file(&args.gt_config)
-            .expect("./labels.toml should exists as described in github repo");
-        let pred_configs = args
-            .configs_pred
-            .into_iter()
-            .map(|path| {
-                DynLabelConfig::load_from_file(&path)
-                    .expect("./labels.toml should exists as described in github repo")
-            })
-            .collect();
-        let conflicts = Conflicts::new(
-            &cc.egui_ctx,
-            &args.gt_dir,
-            gt_config,
-            args.pred_dirs,
-            pred_configs,
-        );
-
-        Self { conflicts }
+    fn handle_prediction_switch(&mut self, ctx: &Context) {
+        // We save the current label and update the state in the new mode
+        if ctx.input_mut(|i| i.consume_key(Modifiers::NONE, Key::ArrowUp)) {
+            self.move_predicitions(PredictionMovement::Next);
+        }
+        if ctx.input_mut(|i| i.consume_key(Modifiers::NONE, Key::ArrowDown)) {
+            self.move_predicitions(PredictionMovement::Previous);
+        }
     }
+    pub fn draw_central_panel(&mut self, ctx: &Context, ui: &mut Ui) {
+        self.handle_prediction_switch(ctx);
+        let img_response = self.draw_img(ui);
+
+        // filter
+        if self.filter {
+            ui.put(
+                self.img_rect,
+                egui::Image::new(&self.mask_texture, self.mask_texture.size_vec2()),
+            );
+        }
+
+        // Draw bbs
+        self.draw_bbs(ui);
+
+        // Handle prev next picture keyboard
+        self.handle_left_right(ctx);
+
+        // Handle clicks for bbs
+        self.handle_img_response(img_response, ui);
+        // Handle class setting
+        self.handle_class_keys(ctx);
+        // Handle filter mode
+        let filter_pressed = ctx.input(|i| i.key_pressed(egui::Key::F));
+        if filter_pressed {
+            self.filter = !self.filter;
+        }
+    }
+    pub fn prepare_switch(&mut self) -> SyncDatasets {
+        let (_, current_pos, _) = self.gt_dataset.get_progress();
+        return SyncDatasets { current_pos };
+    }
+    pub fn refresh_after_switch(&mut self, sync: &SyncDatasets, ctx: &Context) {
+        let SyncDatasets { current_pos } = sync;
+        let movement = DatasetMovement::JumpTo(*current_pos);
+        self.gt_dataset
+            .go(movement, self.current_label.clone(), false)
+            .unwrap();
+        self.current_label = self.gt_dataset.current_label().unwrap();
+        // TODO avoid doing this here
+        self.current_dataset = CurrentDataset::GroundTruth;
+        self.update_texture(ctx);
+        self.update_mask(ctx);
+    }
+}
+
+enum PredictionMovement {
+    Next,
+    Previous,
 }
 
 #[inline]
@@ -410,6 +440,7 @@ fn pos_inside_label_box(label: &YoloLabel, pos: Pos2, img_rect: Rect) -> bool {
         .iter()
         .any(|l| l.to_screen_rect(img_rect).contains(pos))
 }
+// TODO move this to utils in the lib and reuse it with labeling. Or encapsulate all funtionality as a tool or smth
 fn generate_mask(
     label: &YoloLabel,
     shown_classes: &HashSet<usize>,
@@ -434,54 +465,4 @@ fn generate_mask(
     });
     let pixels = mask.as_flat_samples();
     ColorImage::from_rgba_unmultiplied([width, height], pixels.as_slice())
-}
-
-impl eframe::App for BoundrsConflicts {
-    fn update(&mut self, ctx: &Context, _frame: &mut eframe::Frame) {
-        egui::Window::new("Boundrs Labeling").show(ctx, |ui| {
-            // ui.horizontal(|ui| {
-            //     ui.selectable_value(&mut self.mode, Mode::Label, "Label");
-            //     ui.selectable_value(&mut self.mode, Mode::Relabel, "Relabel");
-            // });
-            // ui.label(format!("Current mode: {:?}", self.mode));
-            // ui.separator();
-
-            self.conflicts.draw_ui(ui, ctx);
-        });
-        egui::CentralPanel::default()
-            .frame(egui::Frame::none().fill(Color32::BLACK))
-            .show(ctx, |ui| {
-                // Draw image
-
-                self.handle_mode_switch(ctx);
-
-                let app = &mut self.conflicts;
-
-                let img_response = app.draw_img(ui);
-
-                // filter
-                if app.filter {
-                    ui.put(
-                        app.img_rect,
-                        egui::Image::new(&app.mask_texture, app.mask_texture.size_vec2()),
-                    );
-                }
-
-                // Draw bbs
-                app.draw_bbs(ui);
-
-                // Handle prev next picture keyboard
-                app.handle_left_right(ctx);
-
-                // Handle clicks for bbs
-                app.handle_img_response(img_response, ui);
-                // Handle class setting
-                app.handle_class_keys(ctx);
-                // Handle filter mode
-                let filter_pressed = ctx.input(|i| i.key_pressed(egui::Key::F));
-                if filter_pressed {
-                    app.filter = !app.filter;
-                }
-            });
-    }
 }

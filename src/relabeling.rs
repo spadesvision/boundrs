@@ -4,7 +4,10 @@ use anyhow::Result;
 use eframe::egui;
 use egui::*;
 
-use crate::dataset::{Dataset, DatasetMovement, DynLabel, DynLabelConfig, YoloBB, YoloLabel};
+use crate::{
+    dataset::{Dataset, DatasetMovement, DynLabel, DynLabelConfig, YoloBB, YoloLabel},
+    SyncDatasets,
+};
 // use image::{Rgba, RgbaImage};
 
 pub struct Relabeling {
@@ -307,5 +310,60 @@ impl Relabeling {
             let screen_pos = img_response.interact_pointer_pos().unwrap();
             self.remove_bbs(screen_pos, img_response.rect);
         }
+    }
+    pub fn draw_central_panel(&mut self, ctx: &Context, ui: &mut Ui) {
+        let img_response = self.draw_img(ui);
+
+        // Handle right click
+        self.handle_img_response(img_response, ui);
+
+        // Draw bbs
+        self.draw_bbs(ui);
+
+        self.draw_highlight(ui);
+
+        // Handle prev next picture keyboard
+        self.handle_left_right(ctx);
+
+        // Handle class setting
+        self.handle_class_keys(ctx);
+
+        // Handle labels clearing
+        self.handle_clear(ctx);
+
+        // Handle repeat button
+        if ctx.input(|i| i.key_pressed(egui::Key::R)) {
+            self.repeat_bbs().unwrap();
+        }
+    }
+
+    pub fn prepare_switch(&mut self) -> SyncDatasets {
+        let (_, current_pos, _) = self.old_dataset.get_progress();
+        let (_, new_pos, _) = self.old_dataset.get_progress();
+        assert_eq!(current_pos, new_pos);
+        let movement = DatasetMovement::JumpTo(current_pos);
+        // We only save the new_dataset stuff, not the old stuff, that should only be managed by he labeling application
+        self.old_dataset
+            .go(movement.clone(), self.old_label.clone(), false)
+            .unwrap();
+        self.new_dataset
+            .go(movement, self.new_label.clone(), true)
+            .unwrap();
+        return SyncDatasets { current_pos };
+    }
+    pub fn refresh_after_switch(&mut self, sync: &SyncDatasets, ctx: &Context) {
+        let SyncDatasets { current_pos } = sync;
+        // TODO fix this
+        let movement = DatasetMovement::JumpTo(*current_pos);
+        self.old_dataset
+            .go(movement.clone(), self.old_label.clone(), false)
+            .unwrap();
+        self.new_dataset
+            .go(movement, self.new_label.clone(), false)
+            .unwrap();
+        self.old_label = self.old_dataset.current_label().unwrap();
+        self.new_label = self.new_dataset.current_label().unwrap();
+        self.highlighted = self.find_next_highlighted();
+        self.update_texture(ctx);
     }
 }

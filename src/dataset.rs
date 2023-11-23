@@ -1,7 +1,6 @@
 use anyhow::{anyhow, Error, Result};
 use eframe::egui::*;
 use glob::glob;
-use lazy_static::lazy_static;
 use serde::Deserialize;
 // use serde::Deserialize;
 // use serde::Serialize;
@@ -11,12 +10,6 @@ use std::fs::File;
 use std::io::prelude::*;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
-
-lazy_static! {
-    // static ref CONFIG_STR: String = std::fs::read_to_string("labels.toml").expect("labels.toml file should exist");
-    static ref DYN_CONFIG: DynLabelConfig = DynLabelConfig::load_from_file("labels.toml").expect("labels.toml should contain a table called labels with columns keys and name");
-    // static ref DYN_SHORTCUTS: HashMap<Vec<Key>, DynLabel> = DYN_CONFIG.clone().into_shortcuts();
-}
 
 #[derive(Deserialize, Clone)]
 pub struct DynLabelSpec {
@@ -291,7 +284,7 @@ impl Dataset {
     }
     pub fn with_prefix(labels_dir: &Path, prefix: &str) -> Result<Self> {
         let mut dataset = Dataset::from_input_dir(labels_dir)?;
-        for mut datapoint in &mut dataset.data {
+        for datapoint in &mut dataset.data {
             let label_name = datapoint
                 .label_src
                 .file_name()
