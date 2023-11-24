@@ -2,7 +2,7 @@ use anyhow::Result;
 use eframe::egui;
 use egui::*;
 use std::{
-    collections::HashSet,
+    collections::{HashMap, HashSet},
     fs,
     path::{Path, PathBuf},
     str::FromStr,
@@ -70,7 +70,7 @@ pub struct Conflicts {
     gt_config: DynLabelConfig,
     // TODO store just the folder paths here and config in a separate dictionary
     pred_dirs: Vec<PathBuf>,
-    pred_confs: Vec<DynLabelConfig>,
+    pred_confs: HashMap<PathBuf, DynLabelConfig>,
     zoom: f32,
     // TODO move this to main app, pass new texture out of label / relabel function
     image_texture: egui::TextureHandle,
@@ -82,6 +82,7 @@ pub struct Conflicts {
     shown_classes: HashSet<usize>,
     current_dataset: CurrentDataset,
     current_label: YoloLabel,
+    label_diffs: Vec<(String, i32)>,
 }
 
 impl Conflicts {
@@ -90,25 +91,27 @@ impl Conflicts {
         gt_dataset_dir.push("normal");
         let gt_config = DynLabelConfig::load_from_file("labels_52.toml").unwrap();
 
+        let mut confs = HashMap::new();
         let mut pred_dirs = vec![];
-        let mut pred_confs = vec![];
         for entry in fs::read_dir(dir).unwrap() {
             let entry = entry?;
             let subdir = entry.path();
-            if subdir.is_dir() {
-                pred_dirs.push(subdir);
-                pred_confs.push(DynLabelConfig::load_from_file("labels_52.toml").unwrap());
+            if subdir.is_dir() && subdir.file_name().unwrap().to_str().unwrap() != "normal" {
+                pred_dirs.push(subdir.clone());
+                let conf = DynLabelConfig::load_from_file("labels_52.toml").unwrap();
+                confs.insert(subdir, conf);
             }
         }
+        pred_dirs.sort();
 
-        Conflicts::new(cc, &gt_dataset_dir, gt_config, pred_dirs, pred_confs)
+        Conflicts::new(cc, &gt_dataset_dir, gt_config, pred_dirs, confs)
     }
     pub fn new(
         cc: &Context,
         gt_dataset_dir: &Path,
         gt_config: DynLabelConfig,
         pred_dirs: Vec<PathBuf>,
-        pred_confs: Vec<DynLabelConfig>,
+        pred_confs: HashMap<PathBuf, DynLabelConfig>,
     ) -> anyhow::Result<Self> {
         let shown_classes = HashSet::new();
         let gt_dataset = Dataset::from_input_dir(gt_dataset_dir)?;
@@ -129,17 +132,33 @@ impl Conflicts {
             filter_opacity: 250,
             last_time: 0.0,
             shown_classes: HashSet::new(),
-            current_label: current_bbs,
+            current_label: current_bbs.clone(),
             pred_dirs,
             pred_confs,
             current_dataset: CurrentDataset::GroundTruth,
+            label_diffs: Vec::new(),
         })
     }
     fn get_current_config(&self) -> &DynLabelConfig {
         match self.current_dataset {
             CurrentDataset::GroundTruth => &self.gt_config,
-            CurrentDataset::Predicted(i) => &self.pred_confs[i],
+            CurrentDataset::Predicted(i) => &self.pred_confs[&self.pred_dirs[i]],
         }
+    }
+    // TODO hacky, what is correct?
+    fn label_differences(&self) -> Vec<(String, i32)> {
+        let mut diff_counts: HashMap<_, i32> = HashMap::new();
+        for bbox in &self.gt_dataset.current_label().unwrap() {
+            let name = bbox.class(self.get_current_config()).name[0..1].to_owned();
+            *diff_counts.entry(name).or_default() += 1;
+        }
+        for bbox in &self.current_label {
+            let name = bbox.class(self.get_current_config()).name[0..1].to_owned();
+            *diff_counts.entry(name).or_default() -= 1;
+        }
+        let mut diffs: Vec<_> = diff_counts.into_iter().filter(|(_, v)| *v != 0).collect();
+        diffs.sort();
+        diffs
     }
     pub fn draw_ui(&mut self, ui: &mut Ui, ctx: &Context) {
         ui.horizontal(|ui| {
@@ -191,14 +210,12 @@ impl Conflicts {
             ui.separator();
             ui.label(RichText::new("How to use").heading());
             ui.label(RichText::new(
-                "Choose the active label as with the keybindings as in the config file",
-            ));
-            ui.label(RichText::new("Create label by clicking twice or dragging"));
-            ui.label(RichText::new("Delete labels with a right click"));
-            ui.label(RichText::new("Repeat previous labels: R"));
-            ui.label(RichText::new(
                 "Go left and right: Left Arrow or A and Right Arrow or D",
             ));
+        });
+        ui.vertical(|ui| {
+            ui.separator();
+            ui.label(format!("{:?}", self.label_diffs));
         });
     }
     pub fn draw_img(&mut self, ui: &mut Ui) -> Response {
@@ -233,11 +250,23 @@ impl Conflicts {
         let painter = ui.painter();
         // let size = self.img_rect.size();
         for bb in &self.current_label {
-            let color = bb.class(config).color;
-            let screen_rect = bb.to_screen_rect(img_rect);
-            painter.rect_stroke(screen_rect, Rounding::none(), Stroke::new(2.0, color));
-            let text_pos = screen_rect.left_bottom();
-            self.draw_label_text(painter, text_pos, &bb.class(config));
+            if self
+                .label_diffs
+                .iter()
+                .any(|(label, _)| label == &bb.class(self.get_current_config()).name[0..1])
+            {
+                let color = Color32::WHITE;
+                let screen_rect = bb.to_screen_rect(img_rect);
+                painter.rect_stroke(screen_rect, Rounding::none(), Stroke::new(5.0, color));
+                let text_pos = screen_rect.left_bottom();
+                self.draw_label_text(painter, text_pos, &bb.class(config));
+            } else {
+                let color = bb.class(config).color;
+                let screen_rect = bb.to_screen_rect(img_rect);
+                painter.rect_stroke(screen_rect, Rounding::none(), Stroke::new(2.0, color));
+                let text_pos = screen_rect.left_bottom();
+                self.draw_label_text(painter, text_pos, &bb.class(config));
+            }
         }
     }
     fn draw_label_text(&self, painter: &Painter, text_pos: Pos2, class: &DynLabel) {
@@ -259,11 +288,6 @@ impl Conflicts {
     fn handle_img_response(&mut self, img_response: Response, ui: &mut Ui) {
         if img_response.secondary_clicked() {
             self.update_mask(ui.ctx());
-        }
-
-        // secondary click also regiesters a drag, therefore early return
-        if ui.input(|i| i.pointer.button_down(PointerButton::Secondary)) {
-            return;
         }
     }
     fn class_pressed(&self, ctx: &Context) -> Option<DynLabel> {
@@ -295,7 +319,6 @@ impl Conflicts {
                     self.shown_classes.insert(class.i);
                 }
                 self.update_mask(ctx);
-            } else {
             }
         }
     }
@@ -373,6 +396,7 @@ impl Conflicts {
                     .offset(offset, self.pred_dirs.len() + 1),
             };
         }
+        self.label_diffs = self.label_differences();
     }
     fn handle_prediction_switch(&mut self, ctx: &Context) {
         // We save the current label and update the state in the new mode
@@ -397,10 +421,8 @@ impl Conflicts {
 
         // Draw bbs
         self.draw_bbs(ui);
-
         // Handle prev next picture keyboard
         self.handle_left_right(ctx);
-
         // Handle clicks for bbs
         self.handle_img_response(img_response, ui);
         // Handle class setting
@@ -413,7 +435,7 @@ impl Conflicts {
     }
     pub fn prepare_switch(&mut self) -> SyncDatasets {
         let (_, current_pos, _) = self.gt_dataset.get_progress();
-        return SyncDatasets { current_pos };
+        SyncDatasets { current_pos }
     }
     pub fn refresh_after_switch(&mut self, sync: &SyncDatasets, ctx: &Context) {
         let SyncDatasets { current_pos } = sync;
