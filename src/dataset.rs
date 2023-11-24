@@ -154,6 +154,7 @@ impl YoloBB {
     pub fn class(&self, config: &DynLabelConfig) -> DynLabel {
         // TODO improve error handling, or even better, encode in type system
         config.label_from_usize(self.class_num).unwrap_or_else(|| {
+            println!("{:?}", self);
             panic!(
                 "Config should work with this label, {} > {}",
                 self.class_num,

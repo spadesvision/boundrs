@@ -98,7 +98,17 @@ impl Conflicts {
             let subdir = entry.path();
             if subdir.is_dir() && subdir.file_name().unwrap().to_str().unwrap() != "normal" {
                 pred_dirs.push(subdir.clone());
-                let conf = DynLabelConfig::load_from_file("labels_52.toml").unwrap();
+                let conf = if subdir
+                    .file_name()
+                    .unwrap()
+                    .to_str()
+                    .unwrap()
+                    .contains("yolov7")
+                {
+                    DynLabelConfig::load_from_file("labels_13.toml").unwrap()
+                } else {
+                    DynLabelConfig::load_from_file("labels_52.toml").unwrap()
+                };
                 confs.insert(subdir, conf);
             }
         }
@@ -149,7 +159,7 @@ impl Conflicts {
     fn label_differences(&self) -> Vec<(String, i32)> {
         let mut diff_counts: HashMap<_, i32> = HashMap::new();
         for bbox in &self.gt_dataset.current_label().unwrap() {
-            let name = bbox.class(self.get_current_config()).name[0..1].to_owned();
+            let name = bbox.class(&self.gt_config).name[0..1].to_owned();
             *diff_counts.entry(name).or_default() += 1;
         }
         for bbox in &self.current_label {
