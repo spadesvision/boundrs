@@ -382,7 +382,7 @@ impl Labeling {
                 true,
             )
             .unwrap();
-        return SyncDatasets { current_pos };
+        SyncDatasets { current_pos }
     }
     pub fn refresh_after_switch(&mut self, sync: &SyncDatasets, ctx: &Context) {
         let SyncDatasets { current_pos } = sync;

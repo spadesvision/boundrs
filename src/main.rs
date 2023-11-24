@@ -113,10 +113,9 @@ impl Boundrs {
             relabel_config,
         );
 
-        let conflicts = match args.conflicts_dir {
-            Some(dir) => Some(Conflicts::from_dir(&cc.egui_ctx, &dir).unwrap()),
-            None => None,
-        };
+        let conflicts = args
+            .conflicts_dir
+            .map(|dir| Conflicts::from_dir(&cc.egui_ctx, dir).unwrap());
 
         Self {
             label: label_state,
