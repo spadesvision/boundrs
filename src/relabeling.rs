@@ -1,7 +1,6 @@
 use std::path::Path;
 
 use anyhow::Result;
-use eframe::egui;
 use egui::*;
 
 use crate::{
@@ -14,7 +13,7 @@ pub struct Relabeling {
     // index of currently editing label in old_label
     pub highlighted: Option<usize>,
     zoom: f32,
-    image_texture: egui::TextureHandle,
+    // image_texture: egui::TextureHandle,
     img_rect: Rect,
     pub old_dataset: Dataset,
     old_config: DynLabelConfig,
@@ -28,7 +27,6 @@ pub struct Relabeling {
 
 impl Relabeling {
     pub fn new(
-        ctx: &Context,
         dataset_dir: &Path,
         old_prefix: &str,
         new_prefix: &str,
@@ -37,15 +35,15 @@ impl Relabeling {
     ) -> Self {
         let old_dataset = Dataset::with_prefix(dataset_dir, old_prefix).unwrap();
         let new_dataset = Dataset::with_prefix(dataset_dir, new_prefix).unwrap();
-        let image = old_dataset.current_image().unwrap();
-        let image_texture = ctx.load_texture("my-image", image, egui::TextureOptions::LINEAR);
+        // let image = old_dataset.current_image().unwrap();
+        // let image_texture = ctx.load_texture("my-image", image, egui::TextureOptions::LINEAR);
         let old_label = old_dataset.current_label().unwrap();
         let new_label = new_dataset.current_label().unwrap();
         let highlighted = None;
         let mut relabeling = Relabeling {
             highlighted,
             zoom: 1.5,
-            image_texture,
+            // image_texture,
             img_rect: Rect::NOTHING,
             old_dataset,
             old_config,
@@ -69,7 +67,7 @@ impl Relabeling {
             ui.label("Progress");
             ui.add(DragValue::from_get_set(|new_pos| {
                 if let Some(new_pos) = new_pos {
-                    self.go(DatasetMovement::JumpTo(new_pos as usize), ctx);
+                    // self.go(DatasetMovement::JumpTo(new_pos as usize), ctx);
                 }
                 self.old_dataset.get_progress().1 as f64
             }));
@@ -104,21 +102,21 @@ impl Relabeling {
             ui.label(RichText::new("Go left or right: Left Arrow or Right Arrow"));
         });
     }
-    pub fn draw_img(&mut self, ui: &mut Ui) -> Response {
-        let img_response = ui.add(
-            egui::Image::new(
-                &self.image_texture,
-                self.image_texture.size_vec2() * self.zoom,
-            )
-            .sense(Sense::click_and_drag()),
-        );
-        self.img_rect = img_response.rect;
-        img_response
-    }
+    // pub fn draw_img(&mut self, ui: &mut Ui) -> Response {
+    //     let img_response = ui.add(
+    //         egui::Image::new(
+    //             &self.image_texture,
+    //             self.image_texture.size_vec2() * self.zoom,
+    //         )
+    //         .sense(Sense::click_and_drag()),
+    //     );
+    //     self.img_rect = img_response.rect;
+    //     img_response
+    // }
     pub fn draw_label_text(&self, painter: &Painter, text_pos: Pos2, class: DynLabel) {
         painter.rect(
             Rect::from_two_pos(text_pos, text_pos + [40.0, -35.0].into()),
-            Rounding::none(),
+            Rounding::ZERO,
             class.color,
             Stroke::NONE,
         );
@@ -135,14 +133,14 @@ impl Relabeling {
         for bb in self.old_label.iter() {
             let color = bb.class(&self.old_config).color;
             let screen_rect = bb.to_screen_rect(self.img_rect);
-            painter.rect_stroke(screen_rect, Rounding::none(), Stroke::new(2.0, color));
+            painter.rect_stroke(screen_rect, Rounding::ZERO, Stroke::new(2.0, color));
             let text_pos = screen_rect.left_bottom();
             self.draw_label_text(painter, text_pos, bb.class(&self.old_config));
         }
         for bb in self.new_label.iter() {
             let color = bb.class(&self.new_config).color;
             let screen_rect = bb.to_screen_rect(self.img_rect);
-            painter.rect_stroke(screen_rect, Rounding::none(), Stroke::new(2.0, color));
+            painter.rect_stroke(screen_rect, Rounding::ZERO, Stroke::new(2.0, color));
             let text_pos = screen_rect.left_top();
             self.draw_label_text(painter, text_pos, bb.class(&self.new_config));
         }
@@ -168,52 +166,52 @@ impl Relabeling {
             let screen_rect = bb.to_screen_rect(self.img_rect);
             ui.painter().rect_stroke(
                 screen_rect,
-                Rounding::none(),
+                Rounding::ZERO,
                 Stroke::new(8.0, Color32::WHITE),
             );
         }
     }
-    pub fn update_texture(&mut self, ctx: &Context) {
-        let image = self.old_dataset.current_image().unwrap();
-        self.image_texture = ctx.load_texture("my-image", image, egui::TextureOptions::LINEAR);
-    }
-    pub fn go(&mut self, movement: DatasetMovement, ctx: &Context) {
-        // TODO actually check if labels match correctly, not only length
-        if movement == DatasetMovement::Next && self.new_label.len() != self.old_label.len() {
-            println!(
-                "Missing labels: len new {} vs len old {}",
-                self.new_label.len(),
-                self.old_label.len(),
-            );
-            return;
-        }
-        self.old_dataset
-            .go(movement.clone(), self.old_label.clone(), false)
-            .unwrap();
-        self.new_dataset
-            .go(movement, self.new_label.clone(), true)
-            .unwrap();
-        self.old_label = self.old_dataset.current_label().unwrap();
-        self.new_label = self.new_dataset.current_label().unwrap();
-        self.highlighted = self.find_next_highlighted();
-        self.update_texture(ctx);
-    }
-    pub fn handle_left_right(&mut self, ui: &Ui, ctx: &Context) {
-        let next_pressed = ui.input(|i| i.key_pressed(egui::Key::ArrowRight));
-        let previous_pressed = ui.input(|i| i.key_pressed(egui::Key::ArrowLeft));
+    // pub fn update_texture(&mut self, ctx: &Context) {
+    //     let image = self.old_dataset.current_image().unwrap();
+    // self.image_texture = ctx.load_texture("my-image", image, egui::TextureOptions::LINEAR);
+    // }
+    // pub fn go(&mut self, movement: DatasetMovement, _ctx: &Context) {
+    //     // TODO actually check if labels match correctly, not only length
+    //     if movement == DatasetMovement::Next && self.new_label.len() != self.old_label.len() {
+    //         println!(
+    //             "Missing labels: len new {} vs len old {}",
+    //             self.new_label.len(),
+    //             self.old_label.len(),
+    //         );
+    //         return;
+    //     }
+    //     self.old_dataset
+    //         .go(movement.clone(), self.old_label.clone(), false)
+    //         .unwrap();
+    //     self.new_dataset
+    //         .go(movement, self.new_label.clone(), true)
+    //         .unwrap();
+    //     self.old_label = self.old_dataset.current_label().unwrap();
+    //     self.new_label = self.new_dataset.current_label().unwrap();
+    //     self.highlighted = self.find_next_highlighted();
+    //     // self.update_texture(ctx);
+    // }
+    // pub fn handle_left_right(&mut self, ui: &Ui, ctx: &Context) {
+    //     let next_pressed = ui.input(|i| i.key_pressed(egui::Key::ArrowRight));
+    //     let previous_pressed = ui.input(|i| i.key_pressed(egui::Key::ArrowLeft));
 
-        let movement = match (next_pressed, previous_pressed) {
-            (true, false) => DatasetMovement::Next,
-            (false, true) => DatasetMovement::Previous,
-            _ => return,
-        };
+    //     let movement = match (next_pressed, previous_pressed) {
+    //         (true, false) => DatasetMovement::Next,
+    //         (false, true) => DatasetMovement::Previous,
+    //         _ => return,
+    //     };
 
-        // TODO fix this clone... weird code
-        self.go(movement.clone(), ctx);
-        if movement == DatasetMovement::Next && self.new_label.is_empty() {
-            self.repeat_bbs().unwrap();
-        }
-    }
+    //     // TODO fix this clone... weird code
+    //     // self.go(movement.clone(), ctx);
+    //     if movement == DatasetMovement::Next && self.new_label.is_empty() {
+    //         self.repeat_bbs().unwrap();
+    //     }
+    // }
     pub fn handle_clear(&mut self, ctx: &Context) {
         let delete_pressed = ctx.input(|i| i.key_pressed(egui::Key::Delete));
         if delete_pressed {
@@ -261,7 +259,7 @@ impl Relabeling {
                 && self.highlighted.is_none()
                 && self.auto_repeat
             {
-                self.go(DatasetMovement::Next, ctx);
+                // self.go(DatasetMovement::Next, ctx);
                 self.repeat_bbs().unwrap();
             }
         }
@@ -312,35 +310,35 @@ impl Relabeling {
         }
     }
     pub fn draw_central_panel(&mut self, ctx: &Context, ui: &mut Ui, request_focus: bool) {
-        let img_response = self.draw_img(ui);
+        // let img_response = self.draw_img(ui);
 
         // Handle right click
-        self.handle_img_response(&img_response, ui);
+        // self.handle_img_response(&img_response, ui);
 
         // Draw bbs
         self.draw_bbs(ui);
 
         self.draw_highlight(ui);
 
-        if request_focus {
-            img_response.request_focus();
+        // if request_focus {
+        //     img_response.request_focus();
+        // }
+
+        // if img_response.has_focus() {
+        // Handle prev next picture keyboard
+        // self.handle_left_right(ui, ctx);
+
+        // Handle class setting
+        self.handle_class_keys(ui, ctx);
+
+        // Handle labels clearing
+        self.handle_clear(ctx);
+
+        // Handle repeat button
+        if ctx.input(|i| i.key_pressed(egui::Key::R)) {
+            self.repeat_bbs().unwrap();
         }
-
-        if img_response.has_focus() {
-            // Handle prev next picture keyboard
-            self.handle_left_right(ui, ctx);
-
-            // Handle class setting
-            self.handle_class_keys(ui, ctx);
-
-            // Handle labels clearing
-            self.handle_clear(ctx);
-
-            // Handle repeat button
-            if ctx.input(|i| i.key_pressed(egui::Key::R)) {
-                self.repeat_bbs().unwrap();
-            }
-        }
+        // }
     }
 
     pub fn prepare_switch(&mut self) -> SyncDatasets {
@@ -357,7 +355,7 @@ impl Relabeling {
             .unwrap();
         SyncDatasets { current_pos }
     }
-    pub fn refresh_after_switch(&mut self, sync: &SyncDatasets, ctx: &Context) {
+    pub fn refresh_after_switch(&mut self, sync: &SyncDatasets, _ctx: &Context) {
         let SyncDatasets { current_pos } = sync;
         // TODO fix this
         let movement = DatasetMovement::JumpTo(*current_pos);
@@ -370,6 +368,6 @@ impl Relabeling {
         self.old_label = self.old_dataset.current_label().unwrap();
         self.new_label = self.new_dataset.current_label().unwrap();
         self.highlighted = self.find_next_highlighted();
-        self.update_texture(ctx);
+        // self.update_texture(ctx);
     }
 }

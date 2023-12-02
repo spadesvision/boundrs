@@ -1,5 +1,4 @@
 use anyhow::Result;
-use eframe::egui;
 use egui::*;
 use std::{
     collections::{HashMap, HashSet},
@@ -73,8 +72,6 @@ pub struct Conflicts {
     pred_confs: HashMap<PathBuf, DynLabelConfig>,
     zoom: f32,
     // TODO move this to main app, pass new texture out of label / relabel function
-    image_texture: egui::TextureHandle,
-    mask_texture: egui::TextureHandle,
     img_rect: Rect,
     filter: bool,
     filter_opacity: u8,
@@ -126,17 +123,15 @@ impl Conflicts {
         let shown_classes = HashSet::new();
         let gt_dataset = Dataset::from_input_dir(gt_dataset_dir)?;
         let image = gt_dataset.current_image()?;
-        let image_texture = cc.load_texture("my-image", image, egui::TextureOptions::LINEAR);
         let current_bbs = gt_dataset.current_label()?;
         let mask = generate_mask(&current_bbs, &shown_classes, Rect::NOTHING, 250);
-        let mask_texture = cc.load_texture("mask", mask, egui::TextureOptions::LINEAR);
+        // let mask_texture = cc.load_texture("mask", mask, egui::TextureOptions::LINEAR);
 
         Ok(Conflicts {
             gt_dataset,
             gt_config,
             zoom: 1.5,
-            image_texture,
-            mask_texture,
+            // mask_texture,
             img_rect: Rect::NOTHING,
             filter: false,
             filter_opacity: 250,
@@ -228,32 +223,32 @@ impl Conflicts {
             ui.label(format!("{:?}", self.label_diffs));
         });
     }
-    pub fn draw_img(&mut self, ui: &mut Ui) -> Response {
-        let img_response = ui.add(
-            egui::Image::new(
-                &self.image_texture,
-                self.image_texture.size_vec2() * self.zoom,
-            )
-            .sense(Sense::click_and_drag()),
-        );
-        self.img_rect = img_response.rect;
-        img_response
-    }
-    fn update_texture(&mut self, ctx: &Context) {
-        let image = self.gt_dataset.current_image().unwrap();
-        self.image_texture = ctx.load_texture("my-image", image, egui::TextureOptions::LINEAR);
-    }
-    fn update_mask(&mut self, ctx: &Context) {
-        if self.filter {
-            let mask = generate_mask(
-                &self.current_label,
-                &self.shown_classes,
-                self.img_rect,
-                self.filter_opacity,
-            );
-            self.mask_texture = ctx.load_texture("mask", mask, egui::TextureOptions::LINEAR);
-        }
-    }
+    // pub fn draw_img(&mut self, ui: &mut Ui) -> Response {
+    //     let img_response = ui.add(
+    //         egui::Image::new(
+    //             &self.image_texture,
+    //             self.image_texture.size_vec2() * self.zoom,
+    //         )
+    //         .sense(Sense::click_and_drag()),
+    //     );
+    //     self.img_rect = img_response.rect;
+    //     img_response
+    // }
+    // fn update_texture(&mut self, ctx: &Context) {
+    //     let image = self.gt_dataset.current_image().unwrap();
+    //     self.image_texture = ctx.load_texture("my-image", image, egui::TextureOptions::LINEAR);
+    // }
+    // fn update_mask(&mut self, ctx: &Context) {
+    //     if self.filter {
+    //         let mask = generate_mask(
+    //             &self.current_label,
+    //             &self.shown_classes,
+    //             self.img_rect,
+    //             self.filter_opacity,
+    //         );
+    //         // self.mask_texture = ctx.load_texture("mask", mask, egui::TextureOptions::LINEAR);
+    //     }
+    // }
     fn draw_bbs(&self, ui: &mut Ui) {
         let config = self.get_current_config();
         let img_rect = self.img_rect;
@@ -267,13 +262,13 @@ impl Conflicts {
             {
                 let color = Color32::WHITE;
                 let screen_rect = bb.to_screen_rect(img_rect);
-                painter.rect_stroke(screen_rect, Rounding::none(), Stroke::new(5.0, color));
+                painter.rect_stroke(screen_rect, Rounding::ZERO, Stroke::new(5.0, color));
                 let text_pos = screen_rect.left_bottom();
                 self.draw_label_text(painter, text_pos, &bb.class(config));
             } else {
                 let color = bb.class(config).color;
                 let screen_rect = bb.to_screen_rect(img_rect);
-                painter.rect_stroke(screen_rect, Rounding::none(), Stroke::new(2.0, color));
+                painter.rect_stroke(screen_rect, Rounding::ZERO, Stroke::new(2.0, color));
                 let text_pos = screen_rect.left_bottom();
                 self.draw_label_text(painter, text_pos, &bb.class(config));
             }
@@ -282,7 +277,7 @@ impl Conflicts {
     fn draw_label_text(&self, painter: &Painter, text_pos: Pos2, class: &DynLabel) {
         painter.rect(
             Rect::from_two_pos(text_pos, text_pos + [40.0, -35.0].into()),
-            Rounding::none(),
+            Rounding::ZERO,
             class.color,
             Stroke::NONE,
         );
@@ -297,7 +292,7 @@ impl Conflicts {
     }
     fn handle_img_response(&mut self, img_response: Response, ui: &mut Ui) {
         if img_response.secondary_clicked() {
-            self.update_mask(ui.ctx());
+            // self.update_mask(ui.ctx());
         }
     }
     fn class_pressed(&self, ctx: &Context) -> Option<DynLabel> {
@@ -328,7 +323,7 @@ impl Conflicts {
                 } else {
                     self.shown_classes.insert(class.i);
                 }
-                self.update_mask(ctx);
+                // self.update_mask(ctx);
             }
         }
     }
@@ -357,8 +352,8 @@ impl Conflicts {
             .unwrap();
         self.current_label = self.gt_dataset.current_label().unwrap();
         self.current_dataset = CurrentDataset::GroundTruth; // otherwise need to find current_label in special way
-        self.update_texture(ctx);
-        self.update_mask(ctx);
+                                                            // self.update_texture(ctx);
+                                                            // self.update_mask(ctx);
     }
 
     fn current_label(&mut self) -> Result<Option<YoloLabel>> {
@@ -419,22 +414,22 @@ impl Conflicts {
     }
     pub fn draw_central_panel(&mut self, ctx: &Context, ui: &mut Ui) {
         self.handle_prediction_switch(ctx);
-        let img_response = self.draw_img(ui);
+        // let img_response = self.draw_img(ui);
 
         // filter
-        if self.filter {
-            ui.put(
-                self.img_rect,
-                egui::Image::new(&self.mask_texture, self.mask_texture.size_vec2()),
-            );
-        }
+        // if self.filter {
+        //     ui.put(
+        //         self.img_rect,
+        //         egui::Image::new(&self.mask_texture, self.mask_texture.size_vec2()),
+        //     );
+        // }
 
         // Draw bbs
         self.draw_bbs(ui);
         // Handle prev next picture keyboard
         self.handle_left_right(ctx);
         // Handle clicks for bbs
-        self.handle_img_response(img_response, ui);
+        // self.handle_img_response(img_response, ui);
         // Handle class setting
         self.handle_class_keys(ctx);
         // Handle filter mode
@@ -456,8 +451,8 @@ impl Conflicts {
         self.current_label = self.gt_dataset.current_label().unwrap();
         // TODO avoid doing this here
         self.current_dataset = CurrentDataset::GroundTruth;
-        self.update_texture(ctx);
-        self.update_mask(ctx);
+        // self.update_texture(ctx);
+        // self.update_mask(ctx);
     }
 }
 

@@ -1,5 +1,4 @@
 use anyhow::Result;
-use eframe::egui;
 use egui::*;
 use std::{collections::HashSet, path::Path};
 
@@ -123,32 +122,32 @@ impl Labeling {
             ));
         });
     }
-    pub fn draw_img(&mut self, ui: &mut Ui) -> Response {
-        let img_response = ui.add(
-            egui::Image::new(
-                &self.image_texture,
-                self.image_texture.size_vec2() * self.zoom,
-            )
-            .sense(Sense::click_and_drag()),
-        );
-        self.img_rect = img_response.rect;
-        img_response
-    }
-    fn update_texture(&mut self, ctx: &Context) {
-        let image = self.dataset.current_image().unwrap();
-        self.image_texture = ctx.load_texture("my-image", image, egui::TextureOptions::LINEAR);
-    }
-    fn update_mask(&mut self, ctx: &Context) {
-        if self.filter {
-            let mask = generate_mask(
-                &self.current_label,
-                &self.shown_classes,
-                self.img_rect,
-                self.filter_opacity,
-            );
-            self.mask_texture = ctx.load_texture("mask", mask, egui::TextureOptions::LINEAR);
-        }
-    }
+    // pub fn draw_img(&mut self, ui: &mut Ui) -> Response {
+    //     let img_response = ui.add(
+    //         egui::Image::new(
+    //             &self.image_texture,
+    //             self.image_texture.size_vec2() * self.zoom,
+    //         )
+    //         .sense(Sense::click_and_drag()),
+    //     );
+    //     self.img_rect = img_response.rect;
+    //     img_response
+    // }
+    // fn update_texture(&mut self, ctx: &Context) {
+    // let image = self.dataset.current_image().unwrap();
+    // self.image_texture = ctx.load_texture("my-image", image, egui::TextureOptions::LINEAR);
+    // }
+    // fn update_mask(&mut self, ctx: &Context) {
+    //     if self.filter {
+    //         let mask = generate_mask(
+    //             &self.current_label,
+    //             &self.shown_classes,
+    //             self.img_rect,
+    //             self.filter_opacity,
+    //         );
+    //         self.mask_texture = ctx.load_texture("mask", mask, egui::TextureOptions::LINEAR);
+    //     }
+    // }
     pub fn remove_labels(&mut self, pos: Pos2, img_rect: Rect) {
         self.current_label
             .retain(|label| !label.to_screen_rect(img_rect).contains(pos));
@@ -182,7 +181,7 @@ impl Labeling {
         for bb in &self.current_label {
             let color = bb.class(&self.label_config).color;
             let screen_rect = bb.to_screen_rect(img_rect);
-            painter.rect_stroke(screen_rect, Rounding::none(), Stroke::new(2.0, color));
+            painter.rect_stroke(screen_rect, Rounding::ZERO, Stroke::new(2.0, color));
             let text_pos = screen_rect.left_bottom();
             self.draw_label_text(painter, text_pos, &bb.class(&self.label_config));
         }
@@ -206,7 +205,7 @@ impl Labeling {
     fn draw_label_text(&self, painter: &Painter, text_pos: Pos2, class: &DynLabel) {
         painter.rect(
             Rect::from_two_pos(text_pos, text_pos + [40.0, -35.0].into()),
-            Rounding::none(),
+            Rounding::ZERO,
             class.color,
             Stroke::NONE,
         );
@@ -227,7 +226,7 @@ impl Labeling {
         if img_response.secondary_clicked() {
             let screen_pos = img_response.interact_pointer_pos().unwrap();
             self.remove_bbs(screen_pos, img_response.rect);
-            self.update_mask(ui.ctx());
+            // self.update_mask(ui.ctx());
         }
 
         // secondary click also regiesters a drag, therefore early return
@@ -256,7 +255,7 @@ impl Labeling {
                 let label = YoloBB::from_rect(label_rect, img_rect, &self.current_class);
                 println!("{label:?}");
                 self.add_bb(label);
-                self.update_mask(ui.ctx());
+                // self.update_mask(ui.ctx());
                 BBoxInput::None
             }
         };
@@ -272,7 +271,7 @@ impl Labeling {
                 let label = YoloBB::from_rect(label_rect, img_rect, &self.current_class);
                 println!("{label:?}");
                 self.add_bb(label);
-                self.update_mask(ui.ctx());
+                // self.update_mask(ui.ctx());
                 self.bbox_input = BBoxInput::None
             }
         }
@@ -303,7 +302,7 @@ impl Labeling {
                 } else {
                     self.shown_classes.insert(class.i);
                 }
-                self.update_mask(ctx);
+                // self.update_mask(ctx);
             } else {
                 self.current_class = class.clone();
             }
@@ -328,19 +327,19 @@ impl Labeling {
             .go(movement, self.current_label.clone(), true)
             .unwrap();
         self.current_label = self.dataset.current_label().unwrap();
-        self.update_texture(ctx);
-        self.update_mask(ctx);
+        // self.update_texture(ctx);
+        // self.update_mask(ctx);
     }
     pub fn draw_central_panel(&mut self, ctx: &Context, ui: &mut Ui, request_focus: bool) {
-        let img_response = self.draw_img(ui);
+        // let img_response = self.draw_img(ui);
 
         // filter
-        if self.filter {
-            ui.put(
-                self.img_rect,
-                egui::Image::new(&self.mask_texture, self.mask_texture.size_vec2()),
-            );
-        }
+        // if self.filter {
+        //     ui.put(
+        //         self.img_rect,
+        //         egui::Image::new(&self.mask_texture, self.mask_texture.size_vec2()),
+        //     );
+        // }
 
         // Draw guides
         let pos = ctx.input(|i| i.pointer.hover_pos());
@@ -352,29 +351,29 @@ impl Labeling {
         // Draw bbs
         self.draw_bbs(ui);
 
-        if img_response.clicked() || request_focus {
-            img_response.request_focus();
+        // if img_response.clicked() || request_focus {
+        //     img_response.request_focus();
+        // }
+
+        // if img_response.has_focus() {
+        // Handle prev next picture keyboard
+        self.handle_left_right(ui, ctx);
+
+        // Handle clicks for bbs
+        // self.handle_img_response(img_response, ui);
+        // Handle class setting
+        self.handle_class_keys(ctx);
+        // Handle filter mode
+        let filter_pressed = ui.input(|i| i.key_pressed(egui::Key::F));
+        if filter_pressed {
+            self.filter = !self.filter;
         }
 
-        if img_response.has_focus() {
-            // Handle prev next picture keyboard
-            self.handle_left_right(ui, ctx);
-
-            // Handle clicks for bbs
-            self.handle_img_response(img_response, ui);
-            // Handle class setting
-            self.handle_class_keys(ctx);
-            // Handle filter mode
-            let filter_pressed = ui.input(|i| i.key_pressed(egui::Key::F));
-            if filter_pressed {
-                self.filter = !self.filter;
-            }
-
-            // Handle repeat button
-            if ui.input(|i| i.key_pressed(egui::Key::R)) {
-                self.repeat_mode = !self.repeat_mode;
-            }
+        // Handle repeat button
+        if ui.input(|i| i.key_pressed(egui::Key::R)) {
+            self.repeat_mode = !self.repeat_mode;
         }
+        // }
     }
 
     pub fn prepare_switch(&mut self) -> SyncDatasets {
@@ -395,8 +394,8 @@ impl Labeling {
             .go(movement, self.current_label.clone(), false)
             .unwrap();
         self.current_label = self.dataset.current_label().unwrap();
-        self.update_texture(ctx);
-        self.update_mask(ctx);
+        // self.update_texture(ctx);
+        // self.update_mask(ctx);
     }
 }
 
