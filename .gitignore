@@ -13,3 +13,6 @@ perf.data.old
 
 *.tar
 *.tar.gz
+
+*.csv
+*.md
