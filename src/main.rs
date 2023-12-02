@@ -1,5 +1,7 @@
 use eframe::{egui, CreationContext};
 use egui::*;
+use serde::{Deserialize, Serialize};
+use std::fs::OpenOptions;
 use std::path::PathBuf;
 
 use boundrs::dataset::DynLabelConfig;
@@ -54,11 +56,139 @@ fn main() {
     .unwrap();
 }
 
+#[derive(Debug, Deserialize, Serialize)]
+struct TagEntry {
+    image: String,
+    tag: String,
+}
+
+#[derive(Default)]
+struct TaggingTool {
+    is_open: bool,
+    data: TaggingToolData,
+}
+
+#[derive(Default)]
+struct TaggingToolData {
+    input: String,
+    current_tags: Vec<String>,
+}
+
+impl TaggingToolData {
+    fn draw_tags(&mut self, ui: &mut Ui) {
+        ui.label("Current Tags:");
+        ui.horizontal_wrapped(|ui| {
+            let mut to_remove = None;
+            for (index, tag) in self.current_tags.iter().enumerate() {
+                if ui.button(tag).clicked() {
+                    to_remove = Some(index);
+                }
+            }
+            if let Some(index) = to_remove {
+                self.current_tags.remove(index);
+            }
+        });
+    }
+    fn load_tags(&mut self, current_label_jpg: &str) -> Result<(), csv::Error> {
+        if !PathBuf::from("tags.csv").exists() {
+            let mut wtr = csv::Writer::from_path("tags.csv")?;
+            wtr.write_record(["image", "tag"])?;
+            wtr.flush()?;
+        }
+        let mut rdr = csv::ReaderBuilder::new()
+            .has_headers(true)
+            .from_path("tags.csv")?;
+        self.current_tags.clear();
+        let mut other_tags = vec![];
+        for result in rdr.deserialize() {
+            let record: TagEntry = result?;
+            if record.image == current_label_jpg {
+                self.current_tags.push(record.tag);
+            } else {
+                other_tags.push(record);
+            }
+        }
+        // Overwriting tags.csv with the other_tags
+        // println!("Saving {:?} tags", other_tags);
+        println!("Saving {} tags", other_tags.len());
+        let mut wtr = csv::Writer::from_path("tags.csv")?;
+        if other_tags.is_empty() {
+            wtr.write_record(["image", "tag"])?;
+        }
+        for tag_entry in other_tags {
+            wtr.serialize(tag_entry)?;
+        }
+        wtr.flush()?;
+        Ok(())
+    }
+    fn save_tags(&self, current_label_jpg: &str) -> Result<(), csv::Error> {
+        let file = OpenOptions::new()
+            .write(true)
+            .append(true)
+            .create(true) // Creates the file if it does not exist
+            .open("tags.csv")?;
+
+        let mut wtr = csv::WriterBuilder::new()
+            .has_headers(false)
+            .from_writer(file);
+        for tag in &self.current_tags {
+            let entry = TagEntry {
+                image: current_label_jpg.to_string(),
+                tag: tag.to_string(),
+            };
+            wtr.serialize(entry)?;
+        }
+        println!("Saving additional {} tags", self.current_tags.len());
+        wtr.flush()?;
+        Ok(())
+    }
+}
+
+impl TaggingTool {
+    fn handle_keys(&mut self, ctx: &Context, current_jpg: &str) -> anyhow::Result<()> {
+        if !self.is_open && ctx.input(|i| i.key_pressed(egui::Key::T)) {
+            self.data.load_tags(current_jpg)?;
+            self.is_open = true;
+        }
+        if self.is_open && ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
+            self.data.save_tags(current_jpg)?;
+            self.is_open = false;
+        }
+        Ok(())
+    }
+
+    fn draw_ui(&mut self, ctx: &Context, current_jpg: &str) {
+        self.handle_keys(ctx, current_jpg).unwrap();
+        if self.is_open {
+            egui::Window::new("Tagging Tool")
+                .open(&mut self.is_open)
+                .show(ctx, |ui| {
+                    // show the current tags
+                    self.data.draw_tags(ui);
+
+                    let response = ui.text_edit_singleline(&mut self.data.input);
+                    response.request_focus();
+                    if response.gained_focus() {
+                        println!("gained focus");
+                    }
+
+                    // Add other UI elements for tagging as needed
+                    if ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+                        println!("Adding tag {}", self.data.input);
+                        self.data.current_tags.push(self.data.input.take());
+                    }
+                    // response.request_focus();
+                });
+        }
+    }
+}
+
 struct Boundrs {
     label: Labeling,
     relabel: Relabeling,
     conflicts: Option<Conflicts>,
     mode: Mode,
+    tagging: TaggingTool,
 }
 
 impl Boundrs {
@@ -122,13 +252,14 @@ impl Boundrs {
             relabel: relabel_state,
             conflicts,
             mode: Mode::Label,
+            tagging: TaggingTool::default(),
         }
     }
 }
 
 impl eframe::App for Boundrs {
     fn update(&mut self, ctx: &Context, _frame: &mut eframe::Frame) {
-        egui::Window::new("Boundrs Labeling").show(ctx, |ui| {
+        egui::Window::new("Boundrs").show(ctx, |ui| {
             // ui.horizontal(|ui| {
             //     ui.selectable_value(&mut self.mode, Mode::Label, "Label");
             //     ui.selectable_value(&mut self.mode, Mode::Relabel, "Relabel");
@@ -142,6 +273,7 @@ impl eframe::App for Boundrs {
                 Mode::Conflicts => self.conflicts.as_mut().unwrap().draw_ui(ui, ctx),
             }
         });
+        self.tagging.draw_ui(ctx, self.label.dataset.current_name());
         egui::CentralPanel::default()
             .frame(egui::Frame::none().fill(Color32::BLACK))
             .show(ctx, |ui| {
@@ -149,10 +281,11 @@ impl eframe::App for Boundrs {
 
                 self.handle_mode_switch(ctx);
 
+                let gain_focus = !self.tagging.is_open;
                 match self.mode {
-                    Mode::Label => self.label.draw_central_panel(ctx, ui),
-                    Mode::Relabel => self.relabel.draw_central_panel(ctx, ui),
-                    Mode::Conflicts => self.conflicts.as_mut().unwrap().draw_central_panel(ctx, ui), // TODO refactor. The mode contains the ref to the trait object? unwrap because we dont enter this mode if not available
+                    Mode::Label => self.label.draw_central_panel(ctx, ui, gain_focus),
+                    Mode::Relabel => self.relabel.draw_central_panel(ctx, ui, gain_focus),
+                    Mode::Conflicts => self.conflicts.as_mut().unwrap().draw_central_panel(ctx, ui),
                 }
             });
     }

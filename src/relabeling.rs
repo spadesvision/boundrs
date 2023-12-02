@@ -198,9 +198,9 @@ impl Relabeling {
         self.highlighted = self.find_next_highlighted();
         self.update_texture(ctx);
     }
-    pub fn handle_left_right(&mut self, ctx: &Context) {
-        let next_pressed = ctx.input(|i| i.key_pressed(egui::Key::ArrowRight));
-        let previous_pressed = ctx.input(|i| i.key_pressed(egui::Key::ArrowLeft));
+    pub fn handle_left_right(&mut self, ui: &Ui, ctx: &Context) {
+        let next_pressed = ui.input(|i| i.key_pressed(egui::Key::ArrowRight));
+        let previous_pressed = ui.input(|i| i.key_pressed(egui::Key::ArrowLeft));
 
         let movement = match (next_pressed, previous_pressed) {
             (true, false) => DatasetMovement::Next,
@@ -221,9 +221,9 @@ impl Relabeling {
         }
         self.highlighted = self.find_next_highlighted();
     }
-    fn new_class_pressed(&self, ctx: &Context) -> Option<usize> {
+    fn new_class_pressed(&self, ui: &Ui) -> Option<usize> {
         // TODO fix this
-        ctx.input(|i| {
+        ui.input(|i| {
             if i.key_pressed(Key::H) {
                 Some(0)
             } else if i.key_pressed(Key::D) {
@@ -238,9 +238,9 @@ impl Relabeling {
         })
     }
 
-    pub fn handle_class_keys(&mut self, ctx: &Context) {
+    pub fn handle_class_keys(&mut self, ui: &Ui, ctx: &Context) {
         if let (Some(suit_usize), Some(highlighted)) =
-            (self.new_class_pressed(ctx), self.highlighted)
+            (self.new_class_pressed(ui), self.highlighted)
         {
             let old_bbx = self.old_label[highlighted];
             // let class = old_bbx.class(&self.old_config);
@@ -304,36 +304,42 @@ impl Relabeling {
     fn remove_bbs(&mut self, pos: Pos2, img_rect: Rect) {
         self.remove_labels(pos, img_rect);
     }
-    pub fn handle_img_response(&mut self, img_response: Response, _ui: &mut Ui) {
+    pub fn handle_img_response(&mut self, img_response: &Response, _ui: &mut Ui) {
         if img_response.secondary_clicked() {
             println!("secondary clicked");
             let screen_pos = img_response.interact_pointer_pos().unwrap();
             self.remove_bbs(screen_pos, img_response.rect);
         }
     }
-    pub fn draw_central_panel(&mut self, ctx: &Context, ui: &mut Ui) {
+    pub fn draw_central_panel(&mut self, ctx: &Context, ui: &mut Ui, request_focus: bool) {
         let img_response = self.draw_img(ui);
 
         // Handle right click
-        self.handle_img_response(img_response, ui);
+        self.handle_img_response(&img_response, ui);
 
         // Draw bbs
         self.draw_bbs(ui);
 
         self.draw_highlight(ui);
 
-        // Handle prev next picture keyboard
-        self.handle_left_right(ctx);
+        if request_focus {
+            img_response.request_focus();
+        }
 
-        // Handle class setting
-        self.handle_class_keys(ctx);
+        if img_response.has_focus() {
+            // Handle prev next picture keyboard
+            self.handle_left_right(ui, ctx);
 
-        // Handle labels clearing
-        self.handle_clear(ctx);
+            // Handle class setting
+            self.handle_class_keys(ui, ctx);
 
-        // Handle repeat button
-        if ctx.input(|i| i.key_pressed(egui::Key::R)) {
-            self.repeat_bbs().unwrap();
+            // Handle labels clearing
+            self.handle_clear(ctx);
+
+            // Handle repeat button
+            if ctx.input(|i| i.key_pressed(egui::Key::R)) {
+                self.repeat_bbs().unwrap();
+            }
         }
     }
 

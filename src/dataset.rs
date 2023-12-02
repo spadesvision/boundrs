@@ -233,13 +233,12 @@ impl Datapoint {
         println!("Saving labels to {:?}", self.label_src);
         Ok(())
     }
-    fn name(&self) -> String {
+    fn name(&self) -> &str {
         self.img_src
             .file_name()
             .expect(".jpg path should be a file")
             .to_str()
             .expect(".jpg filename can be made to a string")
-            .into()
     }
 }
 
@@ -312,7 +311,7 @@ impl Dataset {
             })
             .collect()
     }
-    pub fn current_name(&self) -> String {
+    pub fn current_name(&self) -> &str {
         self.data[self.i].name()
     }
     pub fn current_path(&self) -> String {

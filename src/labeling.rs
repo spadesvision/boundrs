@@ -309,11 +309,9 @@ impl Labeling {
             }
         }
     }
-    fn handle_left_right(&mut self, ctx: &Context) {
-        let next_pressed =
-            ctx.input(|i| i.key_pressed(egui::Key::ArrowRight) | i.key_pressed(egui::Key::D));
-        let previous_pressed =
-            ctx.input(|i| i.key_pressed(egui::Key::ArrowLeft) | i.key_pressed(egui::Key::A));
+    fn handle_left_right(&mut self, ui: &Ui, ctx: &Context) {
+        let next_pressed = ui.input(|i| i.key_pressed(egui::Key::ArrowRight));
+        let previous_pressed = ui.input(|i| i.key_pressed(egui::Key::ArrowLeft));
 
         let movement = match (next_pressed, previous_pressed, self.filter) {
             (true, false, false) => DatasetMovement::Next,
@@ -333,7 +331,7 @@ impl Labeling {
         self.update_texture(ctx);
         self.update_mask(ctx);
     }
-    pub fn draw_central_panel(&mut self, ctx: &Context, ui: &mut Ui) {
+    pub fn draw_central_panel(&mut self, ctx: &Context, ui: &mut Ui, request_focus: bool) {
         let img_response = self.draw_img(ui);
 
         // filter
@@ -354,22 +352,28 @@ impl Labeling {
         // Draw bbs
         self.draw_bbs(ui);
 
-        // Handle prev next picture keyboard
-        self.handle_left_right(ctx);
-
-        // Handle clicks for bbs
-        self.handle_img_response(img_response, ui);
-        // Handle class setting
-        self.handle_class_keys(ctx);
-        // Handle filter mode
-        let filter_pressed = ctx.input(|i| i.key_pressed(egui::Key::F));
-        if filter_pressed {
-            self.filter = !self.filter;
+        if img_response.clicked() || request_focus {
+            img_response.request_focus();
         }
 
-        // Handle repeat button
-        if ctx.input(|i| i.key_pressed(egui::Key::R)) {
-            self.repeat_mode = !self.repeat_mode;
+        if img_response.has_focus() {
+            // Handle prev next picture keyboard
+            self.handle_left_right(ui, ctx);
+
+            // Handle clicks for bbs
+            self.handle_img_response(img_response, ui);
+            // Handle class setting
+            self.handle_class_keys(ctx);
+            // Handle filter mode
+            let filter_pressed = ui.input(|i| i.key_pressed(egui::Key::F));
+            if filter_pressed {
+                self.filter = !self.filter;
+            }
+
+            // Handle repeat button
+            if ui.input(|i| i.key_pressed(egui::Key::R)) {
+                self.repeat_mode = !self.repeat_mode;
+            }
         }
     }
 
