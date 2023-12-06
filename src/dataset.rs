@@ -104,7 +104,7 @@ pub struct DynLabel {
 
 pub type YoloLabel = Vec<YoloBB>;
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct YoloBB {
     pub class_num: usize,
     pub x: f32,
@@ -137,6 +137,20 @@ impl YoloBB {
             "{} {} {} {} {}",
             self.class_num, self.x, self.y, self.w, self.h
         )
+    }
+
+    pub fn iou(&self, other: &YoloBB) -> f32 {
+        let rect_0_1: Rect = [[0.0, 0.0].into(), [1.0, 1.0].into()].into();
+        let self_box = self.to_screen_rect(rect_0_1);
+        let other_box = other.to_screen_rect(rect_0_1);
+        self_box.intersect(other_box).area() / self_box.union(other_box).area()
+    }
+    pub fn is_close(&self, other: &YoloBB, threshold: f32) -> bool {
+        let rect_0_1: Rect = [[0.0, 0.0].into(), [1.0, 1.0].into()].into();
+        let self_box = self.to_screen_rect(rect_0_1);
+        let other_box = other.to_screen_rect(rect_0_1);
+        let iou = self_box.intersect(other_box).area() / self_box.union(other_box).area();
+        self.class_num == other.class_num && iou > threshold
     }
 }
 
@@ -403,5 +417,9 @@ impl Dataset {
 
     pub fn current(&self) -> &Datapoint {
         &self.data[self.i]
+    }
+
+    pub fn iter_data(&self) -> impl Iterator<Item = &Datapoint> {
+        self.data.iter()
     }
 }

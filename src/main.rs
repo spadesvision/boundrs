@@ -5,6 +5,9 @@ use egui::*;
 use std::path::PathBuf;
 
 use boundrs::dataset::{Dataset, DatasetMovement, DynLabelConfig};
+use itertools::iproduct;
+
+use boundrs::dataset::{YoloBB, YoloLabel};
 
 use boundrs::conflicts::Conflicts;
 use boundrs::labeling::Labeling;
@@ -17,6 +20,9 @@ use clap::Parser;
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
 struct Args {
+    #[arg(long)]
+    check: Option<PathBuf>,
+
     #[arg(short, long)]
     data_dir: PathBuf,
 
@@ -36,17 +42,105 @@ struct Args {
     conflicts_dir: Option<PathBuf>,
 }
 
+struct LabelDiff {
+    a: YoloLabel,
+    b: YoloLabel,
+    thresh: f32,
+}
+
+impl LabelDiff {
+    fn class_differences_itersection(&self) -> impl Iterator<Item = (&YoloBB, &YoloBB)> + '_ {
+        // Only iterate the intersection, so the order doesn't matter
+        iproduct!(&self.a, &self.b)
+            .filter(|(a_bb, b_bb)| a_bb.iou(b_bb) > self.thresh && a_bb.class_num != b_bb.class_num)
+    }
+    fn only_in_a(&self) -> impl Iterator<Item = &YoloBB> + '_ {
+        self.a
+            .iter()
+            .filter(|a| self.b.iter().all(|b| a.iou(b) < self.thresh))
+    }
+    fn only_in_b(&self) -> impl Iterator<Item = &YoloBB> + '_ {
+        self.b
+            .iter()
+            .filter(|b| self.a.iter().all(|a| b.iou(a) < self.thresh))
+    }
+    fn are_equal(&self) -> bool {
+        self.only_in_a().count() == 0
+            && self.only_in_b().count() == 0
+            && self.class_differences_itersection().count() == 0
+    }
+
+    fn new(a: Vec<YoloBB>, b: Vec<YoloBB>, thresh: f32) -> Self {
+        Self { a, b, thresh }
+    }
+
+    fn summary(&self, a_config: &DynLabelConfig, b_config: &DynLabelConfig) -> String {
+        let only_a = self
+            .only_in_a()
+            .map(|bb| bb.class(a_config).name)
+            .collect::<Vec<String>>()
+            .join(",");
+        let only_b = self
+            .only_in_b()
+            .map(|bb| bb.class(b_config).name)
+            .collect::<Vec<String>>()
+            .join(",");
+        let diffs = self
+            .class_differences_itersection()
+            .map(|(a, b)| format!("{} != {}", a.class(a_config).name, b.class(b_config).name))
+            .collect::<Vec<String>>()
+            .join(",");
+        format!("only a {only_a}; only b {only_b}; diffs {diffs}")
+    }
+}
+
+fn check_differences(
+    path: PathBuf,
+    prefix: &str,
+    prefix_relabel: &str,
+    config: PathBuf,
+    config_relabel: PathBuf,
+) -> anyhow::Result<()> {
+    let dataset = Dataset::with_prefix(&path, prefix)?;
+    let relabel_dataset = Dataset::with_prefix(&path, prefix_relabel)?;
+    let config = DynLabelConfig::load_from_file(config)?;
+    let config_relabel = DynLabelConfig::load_from_file(config_relabel)?;
+
+    for (i, (label, relabel)) in dataset
+        .iter_data()
+        .zip(relabel_dataset.iter_data())
+        .enumerate()
+    {
+        let name = label.img_name();
+        assert_eq!(name, relabel.img_name());
+        let diff = LabelDiff::new(label.load_label()?, relabel.load_label()?, 0.99);
+        if !diff.are_equal() {
+            println!("{i:>8} {name}: {}", diff.summary(&config, &config_relabel))
+        }
+    }
+    Ok(())
+}
+
 fn main() {
     let args = Args::parse();
-    let native_options = eframe::NativeOptions {
-        viewport: egui::ViewportBuilder::default()
-            .with_inner_size([400.0, 300.0])
-            .with_min_inner_size([300.0, 220.0]),
+
+    if let Some(check_path) = args.check {
+        check_differences(
+            check_path,
+            &args.prefix,
+            &args.prefix_relabel,
+            args.config,
+            args.config_relabel,
+        )
+        .unwrap();
+        return;
+    }
+    let options = eframe::NativeOptions {
         ..Default::default()
     };
     eframe::run_native(
         "eframe template",
-        native_options,
+        options,
         Box::new(|cc| Box::new(BoundrsV2::new(cc, args))),
     )
     .unwrap();
