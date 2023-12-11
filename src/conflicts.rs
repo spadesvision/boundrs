@@ -347,9 +347,7 @@ impl Conflicts {
         let current_label = self.current_label.clone();
 
         // move gt dataset
-        self.gt_dataset
-            .go(movement.clone(), current_label.clone(), false)
-            .unwrap();
+        self.gt_dataset.go(movement.clone(), None).unwrap();
         self.current_label = self.gt_dataset.current_label().unwrap();
         self.current_dataset = CurrentDataset::GroundTruth; // otherwise need to find current_label in special way
                                                             // self.update_texture(ctx);
@@ -445,9 +443,7 @@ impl Conflicts {
     pub fn refresh_after_switch(&mut self, sync: &SyncDatasets, ctx: &Context) {
         let SyncDatasets { current_pos } = sync;
         let movement = DatasetMovement::JumpTo(*current_pos);
-        self.gt_dataset
-            .go(movement, self.current_label.clone(), false)
-            .unwrap();
+        self.gt_dataset.go(movement, None).unwrap();
         self.current_label = self.gt_dataset.current_label().unwrap();
         // TODO avoid doing this here
         self.current_dataset = CurrentDataset::GroundTruth;

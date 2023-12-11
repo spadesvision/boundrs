@@ -185,8 +185,8 @@ impl YoloBB {
     }
 }
 
-#[derive(Debug)]
-struct Datapoint {
+#[derive(Debug, Clone)]
+pub struct Datapoint {
     img_src: PathBuf,
     label_src: PathBuf,
 }
@@ -212,7 +212,7 @@ impl Datapoint {
     fn load_image(&self) -> Result<ColorImage> {
         load_image_from_path(&self.img_src)
     }
-    fn load_label(&self) -> Result<YoloLabel> {
+    pub fn load_label(&self) -> Result<YoloLabel> {
         if !self.label_src.exists() {
             File::create(&self.label_src).expect("File creation should not fail");
         }
@@ -225,12 +225,13 @@ impl Datapoint {
         }
         Ok(labels)
     }
-    fn save_label(&self, label: YoloLabel) -> Result<()> {
-        let mut file = File::create(&self.label_src)?;
+    pub fn save_label(&self, label: YoloLabel) -> Result<()> {
+        let mut file = std::io::BufWriter::new(File::create(&self.label_src)?);
         for yolo_label in label {
             writeln!(file, "{}", yolo_label.as_string())?;
         }
         println!("Saving labels to {:?}", self.label_src);
+        file.flush()?;
         Ok(())
     }
     fn name(&self) -> &str {
@@ -298,10 +299,10 @@ impl Dataset {
     }
 
     pub fn current_image(&self) -> Result<ColorImage> {
-        self.data[self.i].load_image()
+        self.current().load_image()
     }
     pub fn current_label(&self) -> Result<YoloLabel> {
-        self.data[self.i].load_label()
+        self.current().load_label()
     }
     pub fn previous_labels(&self, num: usize) -> Result<Vec<YoloLabel>> {
         (1..=num)
@@ -312,10 +313,13 @@ impl Dataset {
             .collect()
     }
     pub fn current_name(&self) -> &str {
-        self.data[self.i].name()
+        self.current().name()
     }
-    pub fn current_path(&self) -> String {
-        self.data[self.i].label_src.to_str().unwrap().into()
+    pub fn current_img_path(&self) -> &PathBuf {
+        &self.current().img_src
+    }
+    pub fn current_img_uri(&self) -> String {
+        format!("file://{}", self.current_img_path().display())
     }
     pub fn get_progress(&self) -> (usize, usize, usize) {
         (0, self.i, self.data.len())
@@ -361,8 +365,8 @@ impl Dataset {
     }
 
     // TOD take Option for label instead of save flag
-    pub fn go(&mut self, movement: DatasetMovement, label: YoloLabel, save: bool) -> Result<()> {
-        if save {
+    pub fn go(&mut self, movement: DatasetMovement, save_label: Option<YoloLabel>) -> Result<()> {
+        if let Some(label) = save_label {
             self.save_label(label)?;
         }
         match movement {
@@ -372,5 +376,9 @@ impl Dataset {
             DatasetMovement::PreviousContaining(classes) => self.previous_containing(&classes),
             DatasetMovement::JumpTo(pos) => self.go_to(pos),
         }
+    }
+
+    pub fn current(&self) -> &Datapoint {
+        &self.data[self.i]
     }
 }

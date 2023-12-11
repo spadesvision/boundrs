@@ -1,12 +1,15 @@
+use anyhow::Result;
+use boundrs::file_loader::BlockingFileLoader;
+use boundrs::Tool;
 use eframe::{egui, CreationContext};
 use egui::*;
 use serde::{Deserialize, Serialize};
 use std::fs::OpenOptions;
 use std::path::PathBuf;
 
-use boundrs::dataset::{Dataset, DynLabelConfig};
+use boundrs::dataset::{Dataset, DatasetMovement, DynLabelConfig};
 
-use boundrs::conflicts::Conflicts;
+// use boundrs::conflicts::Conflicts;
 use boundrs::labeling::Labeling;
 use boundrs::relabeling::Relabeling;
 
@@ -33,12 +36,6 @@ struct Args {
 
     #[arg(short, long)]
     conflicts_dir: Option<PathBuf>,
-}
-#[derive(PartialEq, Debug)]
-enum Mode {
-    Label,
-    Relabel,
-    Conflicts,
 }
 
 fn main() {
@@ -146,7 +143,7 @@ impl TaggingToolData {
 }
 
 impl TaggingTool {
-    fn handle_keys(&mut self, ctx: &Context, current_jpg: &str) -> anyhow::Result<()> {
+    fn handle_keys(&mut self, ctx: &Context, current_jpg: &str) -> Result<()> {
         if !self.is_open && ctx.input(|i| i.key_pressed(egui::Key::T)) {
             self.data.load_tags(current_jpg)?;
             self.is_open = true;
@@ -292,73 +289,162 @@ impl TaggingTool {
 //     }
 // }
 
-trait Tool {
-    fn draw_ui(&mut self, ui: &mut Ui) -> anyhow::Result<()>;
-    fn try_load(ctx: &Context) -> anyhow::Result<Self>
-    where
-        Self: Sized;
-    fn name(&self) -> &str;
+struct Tools {
+    label: Labeling,
+    relabel: Relabeling,
+    mode: ActiveTool,
 }
 
-struct EmptyTool;
-
-impl Tool for EmptyTool {
-    fn draw_ui(&mut self, ui: &mut Ui) -> anyhow::Result<()> {
-        Ok(())
+impl Tools {
+    fn active_mut(&mut self) -> &mut dyn Tool {
+        match self.mode {
+            ActiveTool::Label => &mut self.label,
+            ActiveTool::Relabel => todo!(),
+            ActiveTool::Conflicts => todo!(),
+            ActiveTool::Tagging => todo!(),
+        }
     }
-
-    fn try_load(ctx: &Context) -> anyhow::Result<Self>
-    where
-        Self: Sized,
-    {
-        Ok(EmptyTool {})
+    fn active(&self) -> &dyn Tool {
+        match self.mode {
+            ActiveTool::Label => &self.label,
+            ActiveTool::Relabel => todo!(),
+            ActiveTool::Conflicts => todo!(),
+            ActiveTool::Tagging => todo!(),
+        }
     }
-
-    fn name(&self) -> &str {
-        "No tool is active"
+    fn cylce(&mut self) {
+        use ActiveTool as T;
+        let modes = [T::Label];
+        let current_index = modes.iter().position(|m| self.mode == *m).unwrap_or(0);
+        let next_index = (current_index + 1) % modes.len();
+        self.mode = modes[next_index];
     }
 }
 
+#[derive(PartialEq, Eq, PartialOrd, Ord, Clone, Copy)]
 enum ActiveTool {
-    None,
     Label,
     Relabel,
     Conflicts,
     Tagging,
 }
-
 struct BoundrsV2 {
-    active_tool: Box<dyn Tool>,
+    // current_tool: Box<dyn Tool>,
     // tagging: TaggingTool,
-    // dataset: Dataset,
-    // label: LabelTool,
-    // relabel: RelabelTool,
-    // conflicts: ConflictsTool,
-    mode: ActiveTool,
+    tools: Tools,
+    dataset: Dataset,
+    // conflicts: Conflicts,
 }
 
 impl BoundrsV2 {
-    fn new(cc: &CreationContext<'_>, args: Args) -> Self {
-        let no_tool = EmptyTool::try_load(&cc.egui_ctx).unwrap();
+    fn new(cc: &CreationContext, args: Args) -> Self {
+        let ctx = &cc.egui_ctx;
+        ctx.set_visuals(egui::Visuals {
+            image_loading_spinners: false,
+            ..Default::default()
+        });
+        let dataset = Dataset::from_input_dir(&args.data_dir).unwrap();
+        egui_extras::install_image_loaders(ctx);
+        ctx.add_bytes_loader(std::sync::Arc::new(BlockingFileLoader::default()));
+        // let label = Labeling::new();
+        let label_config = DynLabelConfig::load_from_file(&args.config).unwrap();
+        let label = Labeling::new(
+            ctx,
+            &args.data_dir,
+            &args.prefix,
+            label_config.clone(),
+            dataset.current(),
+        );
+        let relabel_config = DynLabelConfig::load_from_file(&args.config_relabel).unwrap();
+        let relabel = Relabeling::new(
+            &args.data_dir,
+            &args.prefix,
+            &args.prefix_relabel,
+            label_config,
+            relabel_config,
+        );
+
+        // let conflicts = args
+        //     .conflicts_dir
+        //     .map(|dir| Conflicts::from_dir(&cc.egui_ctx, dir).unwrap());
+
         BoundrsV2 {
-            active_tool: Box::new(no_tool),
-            mode: ActiveTool::None,
+            dataset,
+            tools: Tools {
+                label,
+                relabel,
+                mode: ActiveTool::Label,
+            }, // conflicts,
         }
+    }
+}
+
+impl BoundrsV2 {
+    fn go(&mut self, movement: DatasetMovement) -> Result<()> {
+        self.tools.active().save_state(self.dataset.current())?;
+        self.dataset.go(movement, None)?;
+        self.tools
+            .active_mut()
+            .refresh_state(self.dataset.current())?;
+        Ok(())
+    }
+
+    fn draw_top_ui(&mut self, ui: &mut Ui) {
+        ui.label(format!("Active Tool: {:?}", self.tools.active().name()));
+        let filename = self.dataset.current_name();
+        ui.horizontal(|ui| {
+            ui.label("Current image:");
+            ui.label(filename);
+        });
+        ui.horizontal(|ui| {
+            ui.label("Progress");
+            ui.add(DragValue::from_get_set(|new_pos| {
+                if let Some(new_pos) = new_pos {
+                    self.dataset
+                        .go(DatasetMovement::JumpTo(new_pos as usize), None)
+                        .unwrap();
+                }
+                self.dataset.get_progress().1 as f64
+            }));
+            let (_, current, max) = self.dataset.get_progress();
+            ui.add(
+                ProgressBar::new(current as f32 / max as f32)
+                    .show_percentage()
+                    .text(format!("{current} out of {max} images")),
+            );
+        });
     }
 }
 
 impl eframe::App for BoundrsV2 {
     fn update(&mut self, ctx: &Context, _frame: &mut eframe::Frame) {
+        // Handle global shortcuts
+        if ctx.input_mut(|i| i.consume_key(Modifiers::CTRL, Key::Space)) {
+            self.tools.cylce();
+        }
+        if ctx.input_mut(|i| i.consume_key(Modifiers::NONE, Key::ArrowLeft)) {
+            self.go(DatasetMovement::Previous).unwrap();
+        }
+        if ctx.input_mut(|i| i.consume_key(Modifiers::NONE, Key::ArrowRight)) {
+            self.go(DatasetMovement::Next).unwrap();
+        }
+
         // draw own ui
-        // draw tool ui
-        // draw central panel with image
         egui::Window::new("Boundrs").show(ctx, |ui| {
-            ui.label(format!("Active Tool: {:?}", self.active_tool.name()));
+            self.draw_top_ui(ui);
             ui.separator();
-            self.active_tool.draw_ui(ui);
+            // draw tool ui
+            self.tools.active_mut().draw_ui(ui).unwrap();
         });
 
-        egui::CentralPanel::default().frame(egui::Frame::none().fill(Color32::BLACK));
-        // .show(ctx, |ui| ui.image());
+        // draw central panel with image
+        egui::CentralPanel::default()
+            .frame(egui::Frame::none().fill(Color32::BLACK))
+            .show(ctx, |ui| {
+                let response = ui.image(self.dataset.current_img_uri());
+                self.tools
+                    .active_mut()
+                    .draw_in_central_panel(ui, response, &self.dataset)
+            });
     }
 }

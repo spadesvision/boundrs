@@ -347,11 +347,9 @@ impl Relabeling {
         assert_eq!(current_pos, new_pos);
         let movement = DatasetMovement::JumpTo(current_pos);
         // We only save the new_dataset stuff, not the old stuff, that should only be managed by he labeling application
-        self.old_dataset
-            .go(movement.clone(), self.old_label.clone(), false)
-            .unwrap();
+        self.old_dataset.go(movement.clone(), None).unwrap();
         self.new_dataset
-            .go(movement, self.new_label.clone(), true)
+            .go(movement, Some(self.new_label.clone()))
             .unwrap();
         SyncDatasets { current_pos }
     }
@@ -359,12 +357,8 @@ impl Relabeling {
         let SyncDatasets { current_pos } = sync;
         // TODO fix this
         let movement = DatasetMovement::JumpTo(*current_pos);
-        self.old_dataset
-            .go(movement.clone(), self.old_label.clone(), false)
-            .unwrap();
-        self.new_dataset
-            .go(movement, self.new_label.clone(), false)
-            .unwrap();
+        self.old_dataset.go(movement.clone(), None).unwrap();
+        self.new_dataset.go(movement, None).unwrap();
         self.old_label = self.old_dataset.current_label().unwrap();
         self.new_label = self.new_dataset.current_label().unwrap();
         self.highlighted = self.find_next_highlighted();
