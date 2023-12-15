@@ -5,7 +5,7 @@ pub mod labeling;
 pub mod relabeling;
 
 // pub use conflicts::Conflicts;
-use dataset::{Datapoint, Dataset};
+use dataset::{Datapoint, Dataset, DatasetMovement};
 use egui::{Response, Ui};
 pub use labeling::Labeling;
 pub use relabeling::Relabeling;
@@ -26,6 +26,7 @@ pub trait Tool {
         datset: &Dataset,
     ) -> anyhow::Result<()>;
     fn refresh_state(&mut self, datapoint: &Datapoint) -> anyhow::Result<()>;
+    fn suggest_movement<'a>(&'a self, movement: DatasetMovement<'a>) -> DatasetMovement;
     fn save_state(&self, datapoint: &Datapoint) -> anyhow::Result<()>;
     fn name(&self) -> &str;
 }

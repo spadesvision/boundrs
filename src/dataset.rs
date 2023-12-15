@@ -244,11 +244,11 @@ impl Datapoint {
 }
 
 #[derive(Clone, PartialEq)]
-pub enum DatasetMovement {
+pub enum DatasetMovement<'a> {
     Next,
     Previous,
-    NextContaining(HashSet<usize>),
-    PreviousContaining(HashSet<usize>),
+    NextContaining(&'a HashSet<usize>),
+    PreviousContaining(&'a HashSet<usize>),
     JumpTo(usize),
 }
 

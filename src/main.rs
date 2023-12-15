@@ -348,13 +348,7 @@ impl BoundrsV2 {
         ctx.add_bytes_loader(std::sync::Arc::new(BlockingFileLoader::default()));
         // let label = Labeling::new();
         let label_config = DynLabelConfig::load_from_file(&args.config).unwrap();
-        let label = Labeling::new(
-            ctx,
-            &args.data_dir,
-            &args.prefix,
-            label_config.clone(),
-            dataset.current(),
-        );
+        let label = Labeling::new(label_config.clone(), dataset.current());
         let relabel_config = DynLabelConfig::load_from_file(&args.config_relabel).unwrap();
         let relabel = Relabeling::new(
             &args.data_dir,
@@ -382,6 +376,7 @@ impl BoundrsV2 {
 impl BoundrsV2 {
     fn go(&mut self, movement: DatasetMovement) -> Result<()> {
         self.tools.active().save_state(self.dataset.current())?;
+        let movement = self.tools.active().suggest_movement(movement);
         self.dataset.go(movement, None)?;
         self.tools
             .active_mut()
@@ -441,7 +436,9 @@ impl eframe::App for BoundrsV2 {
         egui::CentralPanel::default()
             .frame(egui::Frame::none().fill(Color32::BLACK))
             .show(ctx, |ui| {
-                let response = ui.image(self.dataset.current_img_uri());
+                let img =
+                    egui::Image::new(self.dataset.current_img_uri()).sense(Sense::click_and_drag());
+                let response = ui.add(img);
                 self.tools
                     .active_mut()
                     .draw_in_central_panel(ui, response, &self.dataset)

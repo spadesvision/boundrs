@@ -1,10 +1,10 @@
 use anyhow::Result;
 use egui::{Key, *};
-use std::{collections::HashSet, path::Path};
+use std::collections::HashSet;
 
 use crate::{
     dataset::{Datapoint, Dataset, DatasetMovement, DynLabel, DynLabelConfig, YoloBB, YoloLabel},
-    SyncDatasets, Tool,
+    Tool,
 };
 use image::{Rgba, RgbaImage};
 
@@ -20,24 +20,18 @@ pub struct Labeling {
     // zoom: f32,
     // TODO move this to main app, pass new texture out of label / relabel function
     current_label: YoloLabel,
-    mask_texture: Option<egui::TextureHandle>,
+    filter: Option<egui::TextureHandle>,
+    mask_needs_update: bool,
     bbox_input: BBoxInput,
     repeat_mode: bool,
     current_class: DynLabel,
-    filter: bool,
     filter_opacity: u8,
     shown_classes: HashSet<usize>,
     last_time: f64,
 }
 
 impl Labeling {
-    pub fn new(
-        cc: &Context,
-        dataset_dir: &Path,
-        prefix: &str,
-        label_config: DynLabelConfig,
-        initial: &Datapoint,
-    ) -> Self {
+    pub fn new(label_config: DynLabelConfig, initial: &Datapoint) -> Self {
         let current_class = label_config
             .label_from_usize(0)
             .expect("At least 1 label is needed");
@@ -45,41 +39,25 @@ impl Labeling {
         Labeling {
             label_config,
             current_label,
-            mask_texture: None,
+            filter: None,
+            mask_needs_update: false,
             bbox_input: BBoxInput::None,
             repeat_mode: false,
             current_class,
-            filter: false,
             filter_opacity: 250,
             shown_classes: HashSet::new(),
             last_time: 0.0,
         }
     }
-    // pub fn draw_img(&mut self, ui: &mut Ui) -> Response {
-    //     let img_response = ui.add(
-    //         egui::Image::new(
-    //             &self.image_texture,
-    //             self.image_texture.size_vec2() * self.zoom,
-    //         )
-    //         .sense(Sense::click_and_drag()),
-    //     );
-    //     self.img_rect = img_response.rect;
-    //     img_response
-    // }
-    // fn update_texture(&mut self, ctx: &Context) {
-    // let image = self.dataset.current_image().unwrap();
-    // self.image_texture = ctx.load_texture("my-image", image, egui::TextureOptions::LINEAR);
-    // }
-    fn update_mask(&mut self, ctx: &Context, img_rect: Rect) {
-        if self.filter {
-            let mask = generate_mask(
-                &self.current_label,
-                &self.shown_classes,
-                img_rect,
-                self.filter_opacity,
-            );
-            self.mask_texture = Some(ctx.load_texture("mask", mask, egui::TextureOptions::LINEAR));
-        }
+    fn set_mask(&mut self, ctx: &Context, img_rect: Rect) {
+        let mask = generate_mask(
+            &self.current_label,
+            &self.shown_classes,
+            img_rect,
+            self.filter_opacity,
+        );
+        self.filter = Some(ctx.load_texture("mask", mask, egui::TextureOptions::LINEAR));
+        self.mask_needs_update = false;
     }
     pub fn remove_labels(&mut self, pos: Pos2, img_rect: Rect) {
         self.current_label
@@ -164,7 +142,8 @@ impl Labeling {
         if img_response.secondary_clicked() {
             let screen_pos = img_response.interact_pointer_pos().unwrap();
             self.remove_bbs(screen_pos, img_response.rect);
-            self.update_mask(ui.ctx(), img_response.rect);
+            self.mask_needs_update = true;
+            // self.update_mask(ui.ctx(), img_response.rect);
         }
 
         // secondary click also regiesters a drag, therefore early return
@@ -193,7 +172,8 @@ impl Labeling {
                 let label = YoloBB::from_rect(label_rect, img_rect, &self.current_class);
                 println!("{label:?}");
                 self.add_bb(label);
-                self.update_mask(ui.ctx(), img_response.rect);
+                self.mask_needs_update = true;
+                // self.update_mask(ui.ctx(), img_response.rect);
                 BBoxInput::None
             }
         };
@@ -210,22 +190,13 @@ impl Labeling {
                 let label = YoloBB::from_rect(label_rect, img_rect, &self.current_class);
                 println!("{label:?}");
                 self.add_bb(label);
-                self.update_mask(ui.ctx(), img_response.rect);
+                self.mask_needs_update = true;
+                // self.update_mask(ui.ctx(), img_response.rect);
                 self.bbox_input = BBoxInput::None
             }
         }
     }
     fn class_pressed(&self, ui: &Ui) -> Option<DynLabel> {
-        // for (i, keys) in self.label_config.keybindings().into_iter().enumerate() {
-        //     if keys.iter().all(|k| ctx.input(|i| i.key_down(*k))) {
-        //         // consume all keys
-        //         keys.iter()
-        //             .all(|key| ctx.input_mut(|i| i.consume_key(Modifiers::NONE, *key)));
-        //         let label = self.label_config.label_from_usize(i).unwrap();
-        //         return Some(label);
-        //     }
-        // }
-        // None
         if ui.input(|i| i.time - self.last_time > 0.3) {
             return ui.input(|i| self.label_config.label_from_keys(&i.keys_down));
         }
@@ -235,63 +206,19 @@ impl Labeling {
     fn handle_class_keys(&mut self, ui: &Ui, img_rect: Rect) {
         if let Some(class) = self.class_pressed(ui) {
             self.last_time = ui.input(|i| i.time);
-            if self.filter {
+            if self.filter.is_some() {
                 if self.shown_classes.contains(&class.i) {
                     self.shown_classes.remove(&class.i);
                 } else {
                     self.shown_classes.insert(class.i);
                 }
-                self.update_mask(ui.ctx(), img_rect);
+                self.mask_needs_update = true;
+                // self.update_mask(ui.ctx(), img_rect);
             } else {
                 self.current_class = class.clone();
             }
         }
     }
-    fn handle_left_right(&mut self, ui: &Ui, ctx: &Context) {
-        let next_pressed = ui.input(|i| i.key_pressed(Key::ArrowRight));
-        let previous_pressed = ui.input(|i| i.key_pressed(Key::ArrowLeft));
-
-        let movement = match (next_pressed, previous_pressed, self.filter) {
-            (true, false, false) => DatasetMovement::Next,
-            (false, true, false) => DatasetMovement::Previous,
-            (true, false, true) => DatasetMovement::NextContaining(self.shown_classes.clone()),
-            (false, true, true) => DatasetMovement::PreviousContaining(self.shown_classes.clone()),
-            _ => return,
-        };
-        // self.dataset_move(movement);
-    }
-
-    // pub fn dataset_move(&mut self, movement: DatasetMovement) {
-    //     self.dataset
-    //         .go(movement, self.current_label.clone(), true)
-    //         .unwrap();
-    //     self.current_label = self.dataset.current_label().unwrap();
-    //     // self.update_texture(ctx);
-    // self.update_mask(ctx);
-    // }
-    pub fn draw_central_panel(&mut self, ui: &mut Ui) {}
-
-    // pub fn prepare_switch(&mut self) -> SyncDatasets {
-    //     let (_, current_pos, _) = self.dataset.get_progress();
-    //     self.dataset
-    //         .go(
-    //             DatasetMovement::JumpTo(current_pos),
-    //             self.current_label.clone(),
-    //             true,
-    //         )
-    //         .unwrap();
-    //     SyncDatasets { current_pos }
-    // }
-    // pub fn refresh_after_switch(&mut self, sync: &SyncDatasets, ctx: &Context) {
-    //     let SyncDatasets { current_pos } = sync;
-    //     let movement = DatasetMovement::JumpTo(*current_pos);
-    //     self.dataset
-    //         .go(movement, self.current_label.clone(), false)
-    //         .unwrap();
-    //     self.current_label = self.dataset.current_label().unwrap();
-    //     // self.update_texture(ctx);
-    //     // self.update_mask(ctx);
-    // }
 }
 
 #[inline]
@@ -369,15 +296,22 @@ impl Tool for Labeling {
         img_response: Response,
         dataset: &Dataset,
     ) -> Result<()> {
-        // let img_response = self.draw_img(ui);
+        // Handle filter mode
+        if central_panel.input(|i| i.key_pressed(Key::F)) {
+            if self.filter.is_some() {
+                self.filter = None
+            } else {
+                self.mask_needs_update = true;
+            }
+        }
 
         // filter
-        // if self.filter {
-        //     ui.put(
-        //         self.img_rect,
-        //         egui::Image::new(&self.mask_texture, self.mask_texture.size_vec2()),
-        //     );
-        // }
+        if self.mask_needs_update {
+            self.set_mask(central_panel.ctx(), img_response.rect)
+        }
+        if let Some(mask) = &self.filter {
+            central_panel.put(img_response.rect, egui::Image::new(mask));
+        }
 
         // Draw guides
         let pos = central_panel.input(|i| i.pointer.hover_pos());
@@ -389,23 +323,10 @@ impl Tool for Labeling {
         // Draw bbs
         self.draw_bbs(central_panel, img_response.rect);
 
-        // if img_response.clicked() || request_focus {
-        //     img_response.request_focus();
-        // }
-
-        // if img_response.has_focus() {
-        // Handle prev next picture keyboard
-        // self.handle_left_right(central_panel, ctx);
-        // Handle class setting
         self.handle_class_keys(central_panel, img_response.rect);
 
         // Handle clicks for bbs
         self.handle_img_response(img_response, central_panel, dataset);
-        // Handle filter mode
-        let filter_pressed = central_panel.input(|i| i.key_pressed(Key::F));
-        if filter_pressed {
-            self.filter = !self.filter;
-        }
 
         // Handle repeat button
         if central_panel.input(|i| i.key_pressed(Key::R)) {
@@ -416,6 +337,7 @@ impl Tool for Labeling {
     }
     fn refresh_state(&mut self, datapoint: &Datapoint) -> Result<()> {
         self.current_label = datapoint.load_label()?;
+        self.mask_needs_update = self.filter.is_some();
         Ok(())
     }
     fn save_state(&self, datapoint: &Datapoint) -> Result<()> {
@@ -424,5 +346,18 @@ impl Tool for Labeling {
 
     fn name(&self) -> &str {
         "Labeling Tool"
+    }
+
+    fn suggest_movement<'a>(&'a self, movement: DatasetMovement<'a>) -> DatasetMovement {
+        use DatasetMovement as M;
+        if self.filter.is_some() {
+            match movement {
+                M::Next => M::NextContaining(&self.shown_classes),
+                M::Previous => M::NextContaining(&self.shown_classes),
+                _ => movement,
+            }
+        } else {
+            movement
+        }
     }
 }
