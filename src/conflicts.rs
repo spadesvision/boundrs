@@ -8,8 +8,8 @@ use std::{
 };
 
 use crate::{
-    dataset::{Dataset, DatasetMovement, DynLabel, DynLabelConfig, YoloBB, YoloLabel},
-    SyncDatasets,
+    dataset::{Datapoint, Dataset, DatasetMovement, DynLabel, DynLabelConfig, YoloBB, YoloLabel},
+    Tool,
 };
 use image::{Rgba, RgbaImage};
 
@@ -65,7 +65,6 @@ impl CurrentDataset {
 }
 
 pub struct Conflicts {
-    pub gt_dataset: Dataset,
     gt_config: DynLabelConfig,
     // TODO store just the folder paths here and config in a separate dictionary
     pred_dirs: Vec<PathBuf>,
@@ -73,17 +72,19 @@ pub struct Conflicts {
     zoom: f32,
     // TODO move this to main app, pass new texture out of label / relabel function
     img_rect: Rect,
-    filter: bool,
+    filter: Option<egui::TextureHandle>,
+    mask_needs_update: bool,
     filter_opacity: u8,
     last_time: f64,
     shown_classes: HashSet<usize>,
     current_dataset: CurrentDataset,
+    gt_label: YoloLabel,
     current_label: YoloLabel,
     label_diffs: Vec<(String, i32)>,
 }
 
 impl Conflicts {
-    pub fn from_dir<P: AsRef<Path>>(cc: &Context, dir: P) -> anyhow::Result<Self> {
+    pub fn from_dir<P: AsRef<Path>>(dir: P, initial: &Datapoint) -> anyhow::Result<Self> {
         let mut gt_dataset_dir = PathBuf::from(dir.as_ref());
         gt_dataset_dir.push("normal");
         let gt_config = DynLabelConfig::load_from_file("labels_52.toml").unwrap();
@@ -111,32 +112,27 @@ impl Conflicts {
         }
         pred_dirs.sort();
 
-        Conflicts::new(cc, &gt_dataset_dir, gt_config, pred_dirs, confs)
+        Conflicts::new(gt_config, pred_dirs, confs, initial)
     }
     pub fn new(
-        cc: &Context,
-        gt_dataset_dir: &Path,
         gt_config: DynLabelConfig,
         pred_dirs: Vec<PathBuf>,
         pred_confs: HashMap<PathBuf, DynLabelConfig>,
+        initial: &Datapoint,
     ) -> anyhow::Result<Self> {
-        let shown_classes = HashSet::new();
-        let gt_dataset = Dataset::from_input_dir(gt_dataset_dir)?;
-        let image = gt_dataset.current_image()?;
-        let current_bbs = gt_dataset.current_label()?;
-        let mask = generate_mask(&current_bbs, &shown_classes, Rect::NOTHING, 250);
-        // let mask_texture = cc.load_texture("mask", mask, egui::TextureOptions::LINEAR);
+        let current_bbs = initial.load_label().unwrap();
 
         Ok(Conflicts {
-            gt_dataset,
             gt_config,
             zoom: 1.5,
             // mask_texture,
             img_rect: Rect::NOTHING,
-            filter: false,
+            filter: None,
+            mask_needs_update: false,
             filter_opacity: 250,
             last_time: 0.0,
             shown_classes: HashSet::new(),
+            gt_label: current_bbs.clone(),
             current_label: current_bbs.clone(),
             pred_dirs,
             pred_confs,
@@ -153,7 +149,7 @@ impl Conflicts {
     // TODO hacky, what is correct?
     fn label_differences(&self) -> Vec<(String, i32)> {
         let mut diff_counts: HashMap<_, i32> = HashMap::new();
-        for bbox in &self.gt_dataset.current_label().unwrap() {
+        for bbox in &self.gt_label {
             let name = bbox.class(&self.gt_config).name[0..1].to_owned();
             *diff_counts.entry(name).or_default() += 1;
         }
@@ -165,30 +161,10 @@ impl Conflicts {
         diffs.sort();
         diffs
     }
-    pub fn draw_ui(&mut self, ui: &mut Ui, ctx: &Context) {
-        ui.horizontal(|ui| {
-            let filename = self.gt_dataset.current_name();
-            ui.label("Current image:");
-            ui.label(filename);
-        });
+    pub fn draw_ui(&mut self, ui: &mut Ui) {
         ui.horizontal(|ui| {
             ui.label("Current dataset:");
             ui.label(self.current_dataset.pretty_print(&self.pred_dirs));
-        });
-        ui.horizontal(|ui| {
-            ui.label("Progress");
-            ui.add(DragValue::from_get_set(|new_pos| {
-                if let Some(new_pos) = new_pos {
-                    self.dataset_move(DatasetMovement::JumpTo(new_pos as usize), ctx);
-                }
-                self.gt_dataset.get_progress().1 as f64
-            }));
-            let (_, current, max) = self.gt_dataset.get_progress();
-            ui.add(
-                ProgressBar::new(current as f32 / max as f32)
-                    .show_percentage()
-                    .text(format!("{current} out of {max} images")),
-            );
         });
         ui.horizontal(|ui| {
             ui.label("Filter opacity");
@@ -238,17 +214,15 @@ impl Conflicts {
     //     let image = self.gt_dataset.current_image().unwrap();
     //     self.image_texture = ctx.load_texture("my-image", image, egui::TextureOptions::LINEAR);
     // }
-    // fn update_mask(&mut self, ctx: &Context) {
-    //     if self.filter {
-    //         let mask = generate_mask(
-    //             &self.current_label,
-    //             &self.shown_classes,
-    //             self.img_rect,
-    //             self.filter_opacity,
-    //         );
-    //         // self.mask_texture = ctx.load_texture("mask", mask, egui::TextureOptions::LINEAR);
-    //     }
-    // }
+    fn set_mask(&mut self, ctx: &Context) {
+        let mask = generate_mask(
+            &self.current_label,
+            &self.shown_classes,
+            self.img_rect,
+            self.filter_opacity,
+        );
+        self.filter = Some(ctx.load_texture("mask", mask, egui::TextureOptions::LINEAR));
+    }
     fn draw_bbs(&self, ui: &mut Ui) {
         let config = self.get_current_config();
         let img_rect = self.img_rect;
@@ -290,34 +264,18 @@ impl Conflicts {
             Color32::BLACK,
         );
     }
-    fn handle_img_response(&mut self, img_response: Response, ui: &mut Ui) {
-        if img_response.secondary_clicked() {
-            // self.update_mask(ui.ctx());
-        }
-    }
-    fn class_pressed(&self, ctx: &Context) -> Option<DynLabel> {
-        // for (i, keys) in self.label_config.keybindings().into_iter().enumerate() {
-        //     if keys.iter().all(|k| ctx.input(|i| i.key_down(*k))) {
-        //         // consume all keys
-        //         keys.iter()
-        //             .all(|key| ctx.input_mut(|i| i.consume_key(Modifiers::NONE, *key)));
-        //         let label = self.label_config.label_from_usize(i).unwrap();
-        //         return Some(label);
-        //     }
-        // }
-        // None
-
+    fn class_pressed(&self, ui: &Ui) -> Option<DynLabel> {
         let config = self.get_current_config();
-        if ctx.input(|i| i.time - self.last_time > 0.3) {
-            return ctx.input(|i| config.label_from_keys(&i.keys_down));
+        if ui.input(|i| i.time - self.last_time > 0.3) {
+            return ui.input(|i| config.label_from_keys(&i.keys_down));
         }
         None
     }
 
-    fn handle_class_keys(&mut self, ctx: &Context) {
-        if let Some(class) = self.class_pressed(ctx) {
-            self.last_time = ctx.input(|i| i.time);
-            if self.filter {
+    fn handle_class_keys(&mut self, ui: &Ui) {
+        if let Some(class) = self.class_pressed(ui) {
+            self.last_time = ui.input(|i| i.time);
+            if self.filter.is_some() {
                 if self.shown_classes.contains(&class.i) {
                     self.shown_classes.remove(&class.i);
                 } else {
@@ -327,39 +285,29 @@ impl Conflicts {
             }
         }
     }
-    fn handle_left_right(&mut self, ctx: &Context) {
+    fn handle_left_right(&mut self, ui: &Ui, dataset: &mut Dataset) -> Result<()> {
         let next_pressed =
-            ctx.input(|i| i.key_pressed(egui::Key::ArrowRight) | i.key_pressed(egui::Key::D));
+            ui.input(|i| i.key_pressed(egui::Key::ArrowRight) | i.key_pressed(egui::Key::D));
         let previous_pressed =
-            ctx.input(|i| i.key_pressed(egui::Key::ArrowLeft) | i.key_pressed(egui::Key::A));
+            ui.input(|i| i.key_pressed(egui::Key::ArrowLeft) | i.key_pressed(egui::Key::A));
 
-        let movement = match (next_pressed, previous_pressed, self.filter) {
+        let movement = match (next_pressed, previous_pressed, self.filter.is_some()) {
             (true, false, false) => DatasetMovement::Next,
             (false, true, false) => DatasetMovement::Previous,
             (true, false, true) => DatasetMovement::NextContaining(self.shown_classes.clone()),
             (false, true, true) => DatasetMovement::PreviousContaining(self.shown_classes.clone()),
-            _ => return,
+            _ => return Ok(()),
         };
-        self.dataset_move(movement, ctx);
+        dataset.go(movement, None)?;
+        self.refresh_state(dataset.current())
     }
 
-    fn dataset_move(&mut self, movement: DatasetMovement, ctx: &Context) {
-        let current_label = self.current_label.clone();
-
-        // move gt dataset
-        self.gt_dataset.go(movement.clone(), None).unwrap();
-        self.current_label = self.gt_dataset.current_label().unwrap();
-        self.current_dataset = CurrentDataset::GroundTruth; // otherwise need to find current_label in special way
-                                                            // self.update_texture(ctx);
-                                                            // self.update_mask(ctx);
-    }
-
-    fn current_label(&mut self) -> Result<Option<YoloLabel>> {
+    fn load_current_label(&mut self, dataset: &Dataset) -> Result<Option<YoloLabel>> {
         let label = match self.current_dataset {
-            CurrentDataset::GroundTruth => self.gt_dataset.current_label()?,
+            CurrentDataset::GroundTruth => self.current_label.clone(),
             CurrentDataset::Predicted(i) => {
                 // Here we know the file exists because of the code above
-                let mut gt_name: PathBuf = self.gt_dataset.current_name().into();
+                let mut gt_name: PathBuf = dataset.current_name().into();
                 gt_name.set_extension("txt");
                 let path = &self.pred_dirs[i];
                 let mut label_file = path.clone();
@@ -381,7 +329,7 @@ impl Conflicts {
         Ok(Some(label))
     }
 
-    fn move_predicitions(&mut self, movement: PredictionMovement) {
+    fn move_predicitions(&mut self, movement: PredictionMovement, dataset: &Dataset) {
         let offset = match movement {
             PredictionMovement::Next => 1,
             PredictionMovement::Previous => -1,
@@ -389,7 +337,7 @@ impl Conflicts {
         self.current_dataset
             .offset(offset, self.pred_dirs.len() + 1);
         loop {
-            match self.current_label().unwrap() {
+            match self.load_current_label(dataset).unwrap() {
                 Some(label) => {
                     self.current_label = label;
                     break;
@@ -401,54 +349,14 @@ impl Conflicts {
         }
         self.label_diffs = self.label_differences();
     }
-    fn handle_prediction_switch(&mut self, ctx: &Context) {
+    fn handle_prediction_switch(&mut self, ui: &Ui, dataset: &Dataset) {
         // We save the current label and update the state in the new mode
-        if ctx.input_mut(|i| i.consume_key(Modifiers::NONE, Key::ArrowUp)) {
-            self.move_predicitions(PredictionMovement::Next);
+        if ui.input_mut(|i| i.consume_key(Modifiers::NONE, Key::ArrowUp)) {
+            self.move_predicitions(PredictionMovement::Next, dataset);
         }
-        if ctx.input_mut(|i| i.consume_key(Modifiers::NONE, Key::ArrowDown)) {
-            self.move_predicitions(PredictionMovement::Previous);
+        if ui.input_mut(|i| i.consume_key(Modifiers::NONE, Key::ArrowDown)) {
+            self.move_predicitions(PredictionMovement::Previous, dataset);
         }
-    }
-    pub fn draw_central_panel(&mut self, ctx: &Context, ui: &mut Ui) {
-        self.handle_prediction_switch(ctx);
-        // let img_response = self.draw_img(ui);
-
-        // filter
-        // if self.filter {
-        //     ui.put(
-        //         self.img_rect,
-        //         egui::Image::new(&self.mask_texture, self.mask_texture.size_vec2()),
-        //     );
-        // }
-
-        // Draw bbs
-        self.draw_bbs(ui);
-        // Handle prev next picture keyboard
-        self.handle_left_right(ctx);
-        // Handle clicks for bbs
-        // self.handle_img_response(img_response, ui);
-        // Handle class setting
-        self.handle_class_keys(ctx);
-        // Handle filter mode
-        let filter_pressed = ctx.input(|i| i.key_pressed(egui::Key::F));
-        if filter_pressed {
-            self.filter = !self.filter;
-        }
-    }
-    pub fn prepare_switch(&mut self) -> SyncDatasets {
-        let (_, current_pos, _) = self.gt_dataset.get_progress();
-        SyncDatasets { current_pos }
-    }
-    pub fn refresh_after_switch(&mut self, sync: &SyncDatasets, ctx: &Context) {
-        let SyncDatasets { current_pos } = sync;
-        let movement = DatasetMovement::JumpTo(*current_pos);
-        self.gt_dataset.go(movement, None).unwrap();
-        self.current_label = self.gt_dataset.current_label().unwrap();
-        // TODO avoid doing this here
-        self.current_dataset = CurrentDataset::GroundTruth;
-        // self.update_texture(ctx);
-        // self.update_mask(ctx);
     }
 }
 
@@ -488,4 +396,70 @@ fn generate_mask(
     });
     let pixels = mask.as_flat_samples();
     ColorImage::from_rgba_unmultiplied([width, height], pixels.as_slice())
+}
+
+impl Tool for Conflicts {
+    fn draw_ui(&mut self, ui: &mut Ui) -> anyhow::Result<()> {
+        self.draw_ui(ui);
+        Ok(())
+    }
+
+    fn draw_in_central_panel(
+        &mut self,
+        central_panel: &mut Ui,
+        img_response: Response,
+        dataset: &mut Dataset,
+    ) -> anyhow::Result<()> {
+        self.handle_prediction_switch(central_panel, dataset);
+        // let img_response = self.draw_img(ui);
+
+        // filter
+        // if self.filter {
+        //     ui.put(
+        //         self.img_rect,
+        //         egui::Image::new(&self.mask_texture, self.mask_texture.size_vec2()),
+        //     );
+        // }
+
+        // Draw bbs
+        self.draw_bbs(central_panel);
+        // Handle prev next picture keyboard
+
+        if img_response.has_focus() {
+            self.handle_left_right(central_panel, dataset)?;
+            // Handle clicks for bbs
+            // self.handle_img_response(img_response, ui);
+            // Handle class setting
+            self.handle_class_keys(central_panel);
+            // Handle filter mode
+            if central_panel.input(|i| i.key_pressed(egui::Key::F)) {
+                if self.filter.is_some() {
+                    self.filter = None
+                } else {
+                    self.set_mask(central_panel.ctx())
+                }
+            }
+        }
+        Ok(())
+    }
+
+    fn refresh_state(&mut self, datapoint: &crate::dataset::Datapoint) -> anyhow::Result<()> {
+        self.gt_label = datapoint.load_label()?;
+        self.current_label = datapoint.load_label()?;
+        self.current_dataset = CurrentDataset::GroundTruth;
+        self.mask_needs_update = true;
+        Ok(())
+    }
+
+    fn suggest_movement(&self, movement: DatasetMovement) -> DatasetMovement {
+        movement
+    }
+
+    fn save_state(&self, _datapoint: &crate::dataset::Datapoint) -> anyhow::Result<()> {
+        Ok(())
+    }
+
+    fn name(&self) -> &str {
+        "Conflicts"
+    }
 }

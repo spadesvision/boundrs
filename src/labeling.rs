@@ -222,13 +222,13 @@ impl Labeling {
         let next_pressed = ui.input(|i| i.key_pressed(egui::Key::ArrowRight));
         let previous_pressed = ui.input(|i| i.key_pressed(egui::Key::ArrowLeft));
 
-        let movement = match (next_pressed, previous_pressed) {
-            (true, false) => DatasetMovement::Next,
-            (false, true) => DatasetMovement::Previous,
+        let movement = match (next_pressed, previous_pressed, self.filter.is_some()) {
+            (true, false, false) => DatasetMovement::Next,
+            (false, true, false) => DatasetMovement::Previous,
+            (true, false, true) => DatasetMovement::NextContaining(self.shown_classes.clone()),
+            (false, true, true) => DatasetMovement::PreviousContaining(self.shown_classes.clone()),
             _ => return,
         };
-
-        let movement = self.suggest_movement(movement);
 
         self.save_state(dataset.current()).unwrap();
         dataset.go(movement, None).unwrap();
@@ -379,7 +379,7 @@ impl Tool for Labeling {
         if self.filter.is_some() {
             match movement {
                 M::Next => M::NextContaining(self.shown_classes.clone()),
-                M::Previous => M::NextContaining(self.shown_classes.clone()),
+                M::Previous => M::PreviousContaining(self.shown_classes.clone()),
                 _ => movement,
             }
         } else {

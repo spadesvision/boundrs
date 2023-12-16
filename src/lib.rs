@@ -1,4 +1,4 @@
-// pub mod conflicts;
+pub mod conflicts;
 pub mod dataset;
 pub mod file_loader;
 pub mod labeling;
