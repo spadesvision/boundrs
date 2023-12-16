@@ -299,7 +299,7 @@ impl Tools {
     fn active_mut(&mut self) -> &mut dyn Tool {
         match self.mode {
             ActiveTool::Label => &mut self.label,
-            ActiveTool::Relabel => todo!(),
+            ActiveTool::Relabel => &mut self.relabel,
             ActiveTool::Conflicts => todo!(),
             ActiveTool::Tagging => todo!(),
         }
@@ -307,14 +307,14 @@ impl Tools {
     fn active(&self) -> &dyn Tool {
         match self.mode {
             ActiveTool::Label => &self.label,
-            ActiveTool::Relabel => todo!(),
+            ActiveTool::Relabel => &self.relabel,
             ActiveTool::Conflicts => todo!(),
             ActiveTool::Tagging => todo!(),
         }
     }
     fn cylce(&mut self) {
         use ActiveTool as T;
-        let modes = [T::Label];
+        let modes = [T::Label, T::Relabel];
         let current_index = modes.iter().position(|m| self.mode == *m).unwrap_or(0);
         let next_index = (current_index + 1) % modes.len();
         self.mode = modes[next_index];
@@ -333,6 +333,7 @@ struct BoundrsV2 {
     // tagging: TaggingTool,
     tools: Tools,
     dataset: Dataset,
+    img_needs_focus: bool,
     // conflicts: Conflicts,
 }
 
@@ -351,11 +352,11 @@ impl BoundrsV2 {
         let label = Labeling::new(label_config.clone(), dataset.current());
         let relabel_config = DynLabelConfig::load_from_file(&args.config_relabel).unwrap();
         let relabel = Relabeling::new(
-            &args.data_dir,
             &args.prefix,
             &args.prefix_relabel,
             label_config,
             relabel_config,
+            dataset.current(),
         );
 
         // let conflicts = args
@@ -369,6 +370,7 @@ impl BoundrsV2 {
                 relabel,
                 mode: ActiveTool::Label,
             }, // conflicts,
+            img_needs_focus: true,
         }
     }
 }
@@ -415,22 +417,34 @@ impl eframe::App for BoundrsV2 {
     fn update(&mut self, ctx: &Context, _frame: &mut eframe::Frame) {
         // Handle global shortcuts
         if ctx.input_mut(|i| i.consume_key(Modifiers::CTRL, Key::Space)) {
+            let current = self.dataset.current();
+            self.tools.active().save_state(current).unwrap();
             self.tools.cylce();
+            self.tools.active_mut().refresh_state(current).unwrap();
+            self.img_needs_focus = true;
         }
-        if ctx.input_mut(|i| i.consume_key(Modifiers::NONE, Key::ArrowLeft)) {
-            self.go(DatasetMovement::Previous).unwrap();
-        }
-        if ctx.input_mut(|i| i.consume_key(Modifiers::NONE, Key::ArrowRight)) {
-            self.go(DatasetMovement::Next).unwrap();
-        }
+        // if ctx.input_mut(|i| i.consume_key(Modifiers::NONE, Key::ArrowLeft)) {
+        //     self.go(DatasetMovement::Previous).unwrap();
+        // }
+        // if ctx.input_mut(|i| i.consume_key(Modifiers::NONE, Key::ArrowRight)) {
+        //     self.go(DatasetMovement::Next).unwrap();
+        // }
 
         // draw own ui
-        egui::Window::new("Boundrs").show(ctx, |ui| {
+        let res = egui::Window::new("Boundrs").show(ctx, |ui| {
             self.draw_top_ui(ui);
             ui.separator();
             // draw tool ui
             self.tools.active_mut().draw_ui(ui).unwrap();
         });
+        if let Some(inner) = res {
+            if inner.response.clicked() {
+                inner.response.request_focus()
+            }
+            if inner.response.clicked_elsewhere() || inner.response.lost_focus() {
+                self.img_needs_focus = true
+            }
+        }
 
         // draw central panel with image
         egui::CentralPanel::default()
@@ -439,9 +453,15 @@ impl eframe::App for BoundrsV2 {
                 let img =
                     egui::Image::new(self.dataset.current_img_uri()).sense(Sense::click_and_drag());
                 let response = ui.add(img);
+
+                if self.img_needs_focus {
+                    self.img_needs_focus = false;
+                    response.request_focus();
+                }
+
                 self.tools
                     .active_mut()
-                    .draw_in_central_panel(ui, response, &self.dataset)
+                    .draw_in_central_panel(ui, response, &mut self.dataset)
             });
     }
 }

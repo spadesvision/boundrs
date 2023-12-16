@@ -23,10 +23,10 @@ pub trait Tool {
         &mut self,
         central_panel: &mut Ui,
         img_response: Response,
-        datset: &Dataset,
+        datset: &mut Dataset,
     ) -> anyhow::Result<()>;
     fn refresh_state(&mut self, datapoint: &Datapoint) -> anyhow::Result<()>;
-    fn suggest_movement<'a>(&'a self, movement: DatasetMovement<'a>) -> DatasetMovement;
+    fn suggest_movement(&self, movement: DatasetMovement) -> DatasetMovement;
     fn save_state(&self, datapoint: &Datapoint) -> anyhow::Result<()>;
     fn name(&self) -> &str;
 }

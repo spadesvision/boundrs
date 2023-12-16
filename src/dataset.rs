@@ -234,21 +234,44 @@ impl Datapoint {
         file.flush()?;
         Ok(())
     }
-    fn name(&self) -> &str {
+    fn img_name(&self) -> &str {
         self.img_src
             .file_name()
             .expect(".jpg path should be a file")
             .to_str()
             .expect(".jpg filename can be made to a string")
     }
+    fn label_name(&self) -> &str {
+        self.label_src
+            .file_name()
+            .expect(".jpg path should be a file")
+            .to_str()
+            .expect(".jpg filename can be made to a string")
+    }
+    pub(crate) fn remove_prefix(&self, old_prefix: &str) -> Self {
+        let label_name = self.label_name();
+        let label_name = label_name.replace(old_prefix, "");
+        Self {
+            label_src: self.label_src.with_file_name(label_name),
+            img_src: self.img_src.clone(),
+        }
+    }
+    pub(crate) fn add_prefix(&self, new_prefix: &str) -> Self {
+        let label_name = self.label_name();
+        let label_name = format!("{new_prefix}{label_name}");
+        Self {
+            label_src: self.label_src.with_file_name(label_name),
+            img_src: self.img_src.clone(),
+        }
+    }
 }
 
-#[derive(Clone, PartialEq)]
-pub enum DatasetMovement<'a> {
+#[derive(Debug, Clone, PartialEq)]
+pub enum DatasetMovement {
     Next,
     Previous,
-    NextContaining(&'a HashSet<usize>),
-    PreviousContaining(&'a HashSet<usize>),
+    NextContaining(HashSet<usize>),
+    PreviousContaining(HashSet<usize>),
     JumpTo(usize),
 }
 
@@ -313,7 +336,7 @@ impl Dataset {
             .collect()
     }
     pub fn current_name(&self) -> &str {
-        self.current().name()
+        self.current().img_name()
     }
     pub fn current_img_path(&self) -> &PathBuf {
         &self.current().img_src

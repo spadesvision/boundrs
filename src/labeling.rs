@@ -138,7 +138,7 @@ impl Labeling {
             Color32::BLACK,
         );
     }
-    fn handle_img_response(&mut self, img_response: Response, ui: &mut Ui, dataset: &Dataset) {
+    fn handle_img_response(&mut self, img_response: &Response, ui: &mut Ui, dataset: &Dataset) {
         if img_response.secondary_clicked() {
             let screen_pos = img_response.interact_pointer_pos().unwrap();
             self.remove_bbs(screen_pos, img_response.rect);
@@ -203,7 +203,7 @@ impl Labeling {
         None
     }
 
-    fn handle_class_keys(&mut self, ui: &Ui, img_rect: Rect) {
+    fn handle_class_keys(&mut self, ui: &Ui) {
         if let Some(class) = self.class_pressed(ui) {
             self.last_time = ui.input(|i| i.time);
             if self.filter.is_some() {
@@ -213,11 +213,26 @@ impl Labeling {
                     self.shown_classes.insert(class.i);
                 }
                 self.mask_needs_update = true;
-                // self.update_mask(ui.ctx(), img_rect);
             } else {
                 self.current_class = class.clone();
             }
         }
+    }
+    fn handle_left_right(&mut self, ui: &Ui, dataset: &mut Dataset) {
+        let next_pressed = ui.input(|i| i.key_pressed(egui::Key::ArrowRight));
+        let previous_pressed = ui.input(|i| i.key_pressed(egui::Key::ArrowLeft));
+
+        let movement = match (next_pressed, previous_pressed) {
+            (true, false) => DatasetMovement::Next,
+            (false, true) => DatasetMovement::Previous,
+            _ => return,
+        };
+
+        let movement = self.suggest_movement(movement);
+
+        self.save_state(dataset.current()).unwrap();
+        dataset.go(movement, None).unwrap();
+        self.refresh_state(dataset.current()).unwrap();
     }
 }
 
@@ -257,7 +272,12 @@ impl Tool for Labeling {
     fn draw_ui(&mut self, ui: &mut Ui) -> Result<()> {
         ui.horizontal(|ui| {
             ui.label("Filter opacity");
-            ui.add(Slider::new(&mut self.filter_opacity, 0..=255));
+            if ui
+                .add(Slider::new(&mut self.filter_opacity, 0..=255))
+                .changed()
+            {
+                self.mask_needs_update = true;
+            }
         });
         ui.horizontal(|ui| {
             ui.label("Shown classes:");
@@ -294,19 +314,9 @@ impl Tool for Labeling {
         &mut self,
         central_panel: &mut Ui,
         img_response: Response,
-        dataset: &Dataset,
+        dataset: &mut Dataset,
     ) -> Result<()> {
-        // Handle filter mode
-        if central_panel.input(|i| i.key_pressed(Key::F)) {
-            if self.filter.is_some() {
-                self.filter = None
-            } else {
-                self.mask_needs_update = true;
-            }
-        }
-
-        // filter
-        if self.mask_needs_update {
+        if self.mask_needs_update && self.filter.is_some() {
             self.set_mask(central_panel.ctx(), img_response.rect)
         }
         if let Some(mask) = &self.filter {
@@ -323,16 +333,32 @@ impl Tool for Labeling {
         // Draw bbs
         self.draw_bbs(central_panel, img_response.rect);
 
-        self.handle_class_keys(central_panel, img_response.rect);
+        if img_response.has_focus() {
+            // Handle filter mode
+            if central_panel.input(|i| i.key_pressed(Key::F)) {
+                if self.filter.is_some() {
+                    self.filter = None
+                } else {
+                    self.set_mask(central_panel.ctx(), img_response.rect)
+                }
+            }
 
-        // Handle clicks for bbs
-        self.handle_img_response(img_response, central_panel, dataset);
+            self.handle_class_keys(central_panel);
 
-        // Handle repeat button
-        if central_panel.input(|i| i.key_pressed(Key::R)) {
-            self.repeat_mode = !self.repeat_mode;
+            // Handle clicks for bbs
+            self.handle_img_response(&img_response, central_panel, dataset);
+
+            // Handle repeat button
+            if central_panel.input(|i| i.key_pressed(Key::R)) {
+                self.repeat_mode = !self.repeat_mode;
+            }
+
+            self.handle_left_right(central_panel, dataset);
+
+            if central_panel.input(|i| i.key_pressed(Key::ArrowLeft)) {
+                println!("left pressed in central panel");
+            }
         }
-        // }
         Ok(())
     }
     fn refresh_state(&mut self, datapoint: &Datapoint) -> Result<()> {
@@ -348,12 +374,12 @@ impl Tool for Labeling {
         "Labeling Tool"
     }
 
-    fn suggest_movement<'a>(&'a self, movement: DatasetMovement<'a>) -> DatasetMovement {
+    fn suggest_movement(&self, movement: DatasetMovement) -> DatasetMovement {
         use DatasetMovement as M;
         if self.filter.is_some() {
             match movement {
-                M::Next => M::NextContaining(&self.shown_classes),
-                M::Previous => M::NextContaining(&self.shown_classes),
+                M::Next => M::NextContaining(self.shown_classes.clone()),
+                M::Previous => M::NextContaining(self.shown_classes.clone()),
                 _ => movement,
             }
         } else {
