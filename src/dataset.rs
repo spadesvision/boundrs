@@ -234,14 +234,14 @@ impl Datapoint {
         file.flush()?;
         Ok(())
     }
-    fn img_name(&self) -> &str {
+    pub fn img_name(&self) -> &str {
         self.img_src
             .file_name()
             .expect(".jpg path should be a file")
             .to_str()
             .expect(".jpg filename can be made to a string")
     }
-    fn label_name(&self) -> &str {
+    pub fn label_name(&self) -> &str {
         self.label_src
             .file_name()
             .expect(".jpg path should be a file")

@@ -451,10 +451,6 @@ impl Tool for Conflicts {
         Ok(())
     }
 
-    fn suggest_movement(&self, movement: DatasetMovement) -> DatasetMovement {
-        movement
-    }
-
     fn save_state(&self, _datapoint: &crate::dataset::Datapoint) -> anyhow::Result<()> {
         Ok(())
     }

@@ -3,12 +3,14 @@ pub mod dataset;
 pub mod file_loader;
 pub mod labeling;
 pub mod relabeling;
+pub mod tagging;
 
 // pub use conflicts::Conflicts;
-use dataset::{Datapoint, Dataset, DatasetMovement};
+use dataset::{Datapoint, Dataset};
 use egui::{Response, Ui};
 pub use labeling::Labeling;
 pub use relabeling::Relabeling;
+pub use tagging::Tagging;
 
 pub struct SyncDatasets {
     pub current_pos: usize,
@@ -26,7 +28,6 @@ pub trait Tool {
         datset: &mut Dataset,
     ) -> anyhow::Result<()>;
     fn refresh_state(&mut self, datapoint: &Datapoint) -> anyhow::Result<()>;
-    fn suggest_movement(&self, movement: DatasetMovement) -> DatasetMovement;
     fn save_state(&self, datapoint: &Datapoint) -> anyhow::Result<()>;
     fn name(&self) -> &str;
 }

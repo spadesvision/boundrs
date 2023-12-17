@@ -1,4 +1,10 @@
-use egui::load::{Bytes, BytesLoadResult, BytesLoader, BytesPoll, LoadError};
+use egui::{
+    load::{
+        Bytes, BytesLoadResult, BytesLoader, BytesPoll, LoadError, SizedTexture, TextureLoader,
+        TexturePoll,
+    },
+    Context,
+};
 use std::{sync::Arc, task::Poll};
 
 #[derive(Clone)]
@@ -188,6 +194,58 @@ impl ImageLoader for ImageCrateLoader {
         //         Ok(image) => image.pixels.len() * size_of::<egui::Color32>(),
         //         Err(err) => err.len(),
         //     })
+        //     .sum()
+    }
+}
+
+#[derive(Default)]
+pub struct BoundrsTextureLoader {
+    // cache: Mutex<HashMap<(String, TextureOptions), TextureHandle>>,
+}
+
+impl TextureLoader for BoundrsTextureLoader {
+    fn id(&self) -> &str {
+        egui::generate_loader_id!(DefaultTextureLoader)
+    }
+
+    fn load(
+        &self,
+        ctx: &Context,
+        uri: &str,
+        texture_options: egui::TextureOptions,
+        size_hint: SizeHint,
+    ) -> egui::load::TextureLoadResult {
+        // let mut cache = self.cache.lock();
+        match ctx.try_load_image(uri, size_hint)? {
+            ImagePoll::Pending { size } => Ok(TexturePoll::Pending { size }),
+            ImagePoll::Ready { image } => {
+                let handle = ctx.load_texture(uri, image, texture_options);
+                let texture = SizedTexture::from_handle(&handle);
+                // cache.insert((uri.into(), texture_options), handle);
+                Ok(TexturePoll::Ready { texture })
+            }
+        }
+    }
+
+    fn forget(&self, _uri: &str) {
+        // self.cache.lock().retain(|(u, _), _| u != uri);
+    }
+
+    fn forget_all(&self) {
+        // #[cfg(feature = "log")]
+        // log::trace!("forget all");
+
+        // self.cache.lock().clear();
+    }
+
+    fn end_frame(&self, _: usize) {}
+
+    fn byte_size(&self) -> usize {
+        0
+        // self.cache
+        //     .lock()
+        //     .values()
+        //     .map(|texture| texture.byte_size())
         //     .sum()
     }
 }

@@ -44,7 +44,7 @@ impl Labeling {
             bbox_input: BBoxInput::None,
             repeat_mode: false,
             current_class,
-            filter_opacity: 250,
+            filter_opacity: 220,
             shown_classes: HashSet::new(),
             last_time: 0.0,
         }
@@ -354,10 +354,6 @@ impl Tool for Labeling {
             }
 
             self.handle_left_right(central_panel, dataset);
-
-            if central_panel.input(|i| i.key_pressed(Key::ArrowLeft)) {
-                println!("left pressed in central panel");
-            }
         }
         Ok(())
     }
@@ -372,18 +368,5 @@ impl Tool for Labeling {
 
     fn name(&self) -> &str {
         "Labeling Tool"
-    }
-
-    fn suggest_movement(&self, movement: DatasetMovement) -> DatasetMovement {
-        use DatasetMovement as M;
-        if self.filter.is_some() {
-            match movement {
-                M::Next => M::NextContaining(self.shown_classes.clone()),
-                M::Previous => M::PreviousContaining(self.shown_classes.clone()),
-                _ => movement,
-            }
-        } else {
-            movement
-        }
     }
 }

@@ -339,10 +339,6 @@ impl Tool for Relabeling {
         new_datapoint.save_label(self.new_label.clone())
     }
 
-    fn suggest_movement(&self, movement: DatasetMovement) -> DatasetMovement {
-        movement
-    }
-
     // pub fn prepare_switch(&mut self) -> SyncDatasets {
     //     let (_, current_pos, _) = self.old_dataset.get_progress();
     //     let (_, new_pos, _) = self.old_dataset.get_progress();
