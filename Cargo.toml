@@ -9,7 +9,7 @@ edition = "2021"
 egui = { version = "0.24", features = ["serde"] }
 eframe = { version = "0.24"}
 egui_extras = { version = "*", features = ["all_loaders"] }
-image = { version = "0.24", features = ["jpeg", "png"] }
+image = { version = "0.24", features = ["jpeg", "png"], default_features = false }
 # Add the types you want support forpalette = "*"
 alphanumeric-sort = "*"
 glob = "*"
