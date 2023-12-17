@@ -33,7 +33,7 @@ impl TaggingToolData {
         ui.horizontal_wrapped(|ui| {
             let mut to_remove = None;
             for (index, tag) in self.current_tags.iter().enumerate() {
-                if ui.button(tag).clicked() {
+                if ui.button(tag).clicked() && ui.button(tag).secondary_clicked() {
                     to_remove = Some(index);
                 }
             }
