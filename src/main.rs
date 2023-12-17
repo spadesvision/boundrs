@@ -1,6 +1,6 @@
 use anyhow::Result;
 use boundrs::conflicts::Conflicts;
-use boundrs::file_loader::BlockingFileLoader;
+use boundrs::file_loader::{BlockingFileLoader, ImageCrateLoader};
 use boundrs::Tool;
 use eframe::{egui, CreationContext};
 use egui::*;
@@ -243,8 +243,15 @@ impl BoundrsV2 {
             ..Default::default()
         });
         let dataset = Dataset::from_input_dir(&args.data_dir).unwrap();
-        egui_extras::install_image_loaders(ctx);
+        // egui_extras::install_image_loaders(ctx);
+        // ctx.add_image_loader(std::sync::Arc::new(
+        //     egui_extras::image_loader::ImageCrateLoader::default(),
+        // ));
+        // log::trace!("installed ImageCrateLoader");
+        ctx.add_image_loader(std::sync::Arc::new(ImageCrateLoader::default()));
+        log::trace!("installed ImageCrateLoader");
         ctx.add_bytes_loader(std::sync::Arc::new(BlockingFileLoader::default()));
+        log::trace!("installed BlockingFileLoader");
 
         // let label = Labeling::new();
         let tools = Tools::init(args, &dataset);
