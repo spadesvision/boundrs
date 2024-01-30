@@ -1,0 +1,15 @@
+[[labels]]
+keys = ["H"]
+name = "H"
+
+[[labels]]
+keys = ["D"]
+name = "D"
+
+[[labels]]
+keys = ["C"]
+name = "C"
+
+[[labels]]
+keys = ["S"]
+name = "S"

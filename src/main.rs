@@ -1,14 +1,13 @@
 use boundrs::file_loader::{BlockingFileLoader, ImageCrateLoader};
+use boundrs::shady::ShadyFinder;
 use boundrs::Tool;
 use eframe::{egui, CreationContext};
 use egui::*;
 use std::path::PathBuf;
 
 use boundrs::dataset::{Dataset, DatasetMovement, DynLabelConfig};
-use itertools::iproduct;
 
-use boundrs::dataset::{YoloBB, YoloLabel};
-
+use boundrs::check::check_differences;
 use boundrs::conflicts::Conflicts;
 use boundrs::labeling::Labeling;
 use boundrs::relabeling::Relabeling;
@@ -16,13 +15,44 @@ use boundrs::tagging::Tagging;
 
 use clap::Parser;
 
-/// Simple program to greet a person
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
 struct Args {
-    #[arg(long)]
-    check: Option<PathBuf>,
+    #[command(subcommand)]
+    command: Command,
+}
 
+#[derive(Parser, Debug)]
+enum Command {
+    Diffs(DiffsArgs),
+    FindShady(FindShadyArgs),
+    Label(LabelArgs),
+}
+
+#[derive(Parser, Debug)]
+struct FindShadyArgs {
+    data_dir: PathBuf,
+}
+
+#[derive(Parser, Debug)]
+struct DiffsArgs {
+    #[arg(long, default_value = "")]
+    prefix: String,
+
+    #[arg(long, default_value = "new_")]
+    prefix_relabel: String,
+
+    #[arg(long, default_value = "./labels_13.toml")]
+    config: PathBuf,
+
+    #[arg(long, default_value = "./labels_52.toml")]
+    config_relabel: PathBuf,
+
+    data_dir: PathBuf,
+}
+
+#[derive(Parser, Debug)]
+struct LabelArgs {
     #[arg(short, long)]
     data_dir: PathBuf,
 
@@ -42,108 +72,36 @@ struct Args {
     conflicts_dir: Option<PathBuf>,
 }
 
-struct LabelDiff {
-    a: YoloLabel,
-    b: YoloLabel,
-    thresh: f32,
-}
-
-impl LabelDiff {
-    fn class_differences_itersection(&self) -> impl Iterator<Item = (&YoloBB, &YoloBB)> + '_ {
-        // Only iterate the intersection, so the order doesn't matter
-        iproduct!(&self.a, &self.b)
-            .filter(|(a_bb, b_bb)| a_bb.iou(b_bb) > self.thresh && a_bb.class_num != b_bb.class_num)
-    }
-    fn only_in_a(&self) -> impl Iterator<Item = &YoloBB> + '_ {
-        self.a
-            .iter()
-            .filter(|a| self.b.iter().all(|b| a.iou(b) < self.thresh))
-    }
-    fn only_in_b(&self) -> impl Iterator<Item = &YoloBB> + '_ {
-        self.b
-            .iter()
-            .filter(|b| self.a.iter().all(|a| b.iou(a) < self.thresh))
-    }
-    fn are_equal(&self) -> bool {
-        self.only_in_a().count() == 0
-            && self.only_in_b().count() == 0
-            && self.class_differences_itersection().count() == 0
-    }
-
-    fn new(a: Vec<YoloBB>, b: Vec<YoloBB>, thresh: f32) -> Self {
-        Self { a, b, thresh }
-    }
-
-    fn summary(&self, a_config: &DynLabelConfig, b_config: &DynLabelConfig) -> String {
-        let only_a = self
-            .only_in_a()
-            .map(|bb| bb.class(a_config).name)
-            .collect::<Vec<String>>()
-            .join(",");
-        let only_b = self
-            .only_in_b()
-            .map(|bb| bb.class(b_config).name)
-            .collect::<Vec<String>>()
-            .join(",");
-        let diffs = self
-            .class_differences_itersection()
-            .map(|(a, b)| format!("{} != {}", a.class(a_config).name, b.class(b_config).name))
-            .collect::<Vec<String>>()
-            .join(",");
-        format!("only a {only_a}; only b {only_b}; diffs {diffs}")
-    }
-}
-
-fn check_differences(
-    path: PathBuf,
-    prefix: &str,
-    prefix_relabel: &str,
-    config: PathBuf,
-    config_relabel: PathBuf,
-) -> anyhow::Result<()> {
-    let dataset = Dataset::with_prefix(&path, prefix)?;
-    let relabel_dataset = Dataset::with_prefix(&path, prefix_relabel)?;
-    let config = DynLabelConfig::load_from_file(config)?;
-    let config_relabel = DynLabelConfig::load_from_file(config_relabel)?;
-
-    for (i, (label, relabel)) in dataset
-        .iter_data()
-        .zip(relabel_dataset.iter_data())
-        .enumerate()
-    {
-        let name = label.img_name();
-        assert_eq!(name, relabel.img_name());
-        let diff = LabelDiff::new(label.load_label()?, relabel.load_label()?, 0.99);
-        if !diff.are_equal() {
-            println!("{i:>8} {name}: {}", diff.summary(&config, &config_relabel))
-        }
-    }
-    Ok(())
-}
-
 fn main() {
     let args = Args::parse();
 
-    if let Some(check_path) = args.check {
-        check_differences(
-            check_path,
-            &args.prefix,
-            &args.prefix_relabel,
-            args.config,
-            args.config_relabel,
-        )
-        .unwrap();
-        return;
+    match args.command {
+        Command::Diffs(args) => {
+            check_differences(
+                args.data_dir,
+                &args.prefix,
+                &args.prefix_relabel,
+                args.config,
+                args.config_relabel,
+            )
+            .unwrap();
+        }
+        Command::Label(args) => {
+            let options = eframe::NativeOptions {
+                ..Default::default()
+            };
+            eframe::run_native(
+                "eframe template",
+                options,
+                Box::new(|cc| Box::new(BoundrsV2::new(cc, args))),
+            )
+            .unwrap();
+        }
+        Command::FindShady(args) => {
+            let shady = ShadyFinder::new(&args.data_dir).unwrap();
+            shady.suggest_labels("suggested_").unwrap();
+        }
     }
-    let options = eframe::NativeOptions {
-        ..Default::default()
-    };
-    eframe::run_native(
-        "eframe template",
-        options,
-        Box::new(|cc| Box::new(BoundrsV2::new(cc, args))),
-    )
-    .unwrap();
 }
 
 struct Tools {
@@ -173,7 +131,7 @@ impl Tools {
         self.tagging_active = !self.tagging_active
     }
 
-    fn init(args: Args, dataset: &Dataset) -> Tools {
+    fn init(args: LabelArgs, dataset: &Dataset) -> Tools {
         let mut all_tools: Vec<Box<dyn Tool>> = vec![];
         let label_config = DynLabelConfig::load_from_file(&args.config).unwrap();
         let label = Labeling::new(label_config.clone(), dataset.current());
@@ -216,7 +174,7 @@ struct BoundrsV2 {
 }
 
 impl BoundrsV2 {
-    fn new(cc: &CreationContext, args: Args) -> Self {
+    fn new(cc: &CreationContext, args: LabelArgs) -> Self {
         let ctx = &cc.egui_ctx;
         ctx.set_visuals(egui::Visuals {
             image_loading_spinners: false,

@@ -11,6 +11,8 @@ use std::io::prelude::*;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
 
+use log::debug;
+
 #[derive(Deserialize, Clone)]
 pub struct DynLabelSpec {
     keys: HashSet<Key>,
@@ -214,7 +216,7 @@ fn load_image_from_path(path: &std::path::Path) -> Result<ColorImage> {
 }
 
 impl Datapoint {
-    fn new(img_src: PathBuf, labels_dir: PathBuf) -> Self {
+    pub fn new(img_src: PathBuf, labels_dir: PathBuf) -> Self {
         let img_filename = img_src
             .file_name()
             .expect(".jpg extension should be a file");
@@ -244,7 +246,7 @@ impl Datapoint {
         for yolo_label in label {
             writeln!(file, "{}", yolo_label.as_string())?;
         }
-        println!("Saving labels to {:?}", self.label_src);
+        debug!("Saving labels to {:?}", self.label_src);
         file.flush()?;
         Ok(())
     }

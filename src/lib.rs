@@ -5,6 +5,9 @@ pub mod labeling;
 pub mod relabeling;
 pub mod tagging;
 
+pub mod check;
+pub mod shady;
+
 // pub use conflicts::Conflicts;
 use dataset::{Datapoint, Dataset};
 use egui::{Response, Ui};
