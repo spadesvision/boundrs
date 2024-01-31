@@ -1,4 +1,6 @@
 use anyhow::Result;
+use itertools::Itertools;
+use log::{info, warn};
 
 use crate::{
     check::LabelDiff,
@@ -18,20 +20,8 @@ enum LabelType {
     Value,
     Suit,
 }
-impl LabelType {
-    fn cast(&self, label: &mut Vec<YoloBB>) {
-        let max_usize = match self {
-            LabelType::ValueSuit => 13 * 4,
-            LabelType::Value => 13,
-            LabelType::Suit => 4,
-        };
-        for l in label {
-            l.class_num = l.class_num % max_usize
-        }
-    }
-}
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 enum Augmentation {
     PreciseBBox,
     InpreciseBBox,
@@ -48,6 +38,7 @@ struct Dataset {
     name: String,
     points: Vec<Datapoint>,
     metadata: Metadata,
+    #[allow(dead_code)]
     config: DynLabelConfig,
 }
 
@@ -123,29 +114,43 @@ pub struct ShadyFinder {
 }
 
 struct MultipleLabels {
+    #[allow(dead_code)]
     normal_index: usize,
     labels: Vec<(YoloLabel, Metadata)>,
 }
 
+use linfa::dataset::{DatasetBase, Labels};
+use linfa::traits::*;
+use linfa_clustering::Dbscan;
+use ndarray::arr2;
+
 impl MultipleLabels {
-    fn diffs_to_normal(&self) -> impl Iterator<Item = (LabelDiff, &Metadata)> {
+    fn to_centroids(&self) -> impl Iterator<Item = [f32; 2]> + '_ {
         self.labels
             .iter()
-            .enumerate()
-            .filter_map(|(i, label)| {
-                if i != self.normal_index {
-                    Some(label)
-                } else {
-                    None
-                }
-            })
-            .map(|(label, meta)| {
-                (
-                    LabelDiff::new(&self.labels[self.normal_index].0, label, 0.95),
-                    meta,
-                )
-            })
+            .flat_map(|(l, _)| l.iter())
+            .map(|bbox| bbox.center())
     }
+    fn do_dbscan(&self) {
+        let min_points = 2;
+        let centroids = self.to_centroids();
+        let data = arr2(&centroids.collect_vec());
+        let data = DatasetBase::from(data);
+        let clusters = Dbscan::params(min_points)
+            .tolerance(0.002)
+            .transform(data)
+            .unwrap();
+        let count = &clusters.label_count()[0];
+        if count.values().unique().count() != 1 {
+            // let clusters = clusters.targets();
+
+            // warn!("{clusters:?}");
+            warn!("count {:?}", count);
+            warn!("freq {:?}", clusters.label_frequencies());
+            warn!("freq {:?}", clusters.label_set());
+        }
+    }
+
     fn labels_for<'b, F: Fn(&Metadata) -> bool + 'b>(
         &'b self,
         filter: F,
@@ -158,11 +163,15 @@ impl MultipleLabels {
     fn suggested_label(&self) -> YoloLabel {
         // take the yolov7 labels with only values as the base
         // if all yolov8 agree with the suit, then take that
+        self.do_dbscan();
         let yolov7_base = self
-            .labels_for(|m| m.model == Model::YoloV7)
+            .labels_for(|m| m.model == Model::YoloV7 && m.augmentation == Augmentation::PreciseBBox)
             .next()
             .expect("should have yolov7 label");
         let only_suit = self.labels_for(|m| m.label_type == LabelType::Suit);
+        // let mut value_suit = self
+        //     .labels_for(|m| m.label_type == LabelType::ValueSuit)
+        //     .collect_vec();
         // let mega_suit = all_suit.into_iter().flatten();
         // This is asymetric, because otherwise it will be too many computations
         let mut suggestions = vec![];
@@ -215,8 +224,8 @@ impl ShadyFinder {
         let normal = self.normal_dataset.points[i].load_label()?;
         let mut labels = vec![(normal, self.normal_dataset.metadata.clone())];
         for aug_data in &self.augmented {
-            let mut label = aug_data.points[i].load_label()?;
-            aug_data.metadata.label_type.cast(&mut label);
+            let label = aug_data.points[i].load_label()?;
+            // aug_data.metadata.label_type.cast(&mut label);
             // let diff = LabelDiff::new(&normal, &augmented, 0.97);
             labels.push((label, aug_data.metadata.clone()));
         }
@@ -259,6 +268,7 @@ impl ShadyFinder {
     pub fn suggest_labels(&self, prefix: &str) -> Result<()> {
         for i in 0..self.normal_dataset.points.len() {
             let diff = self.read_all_labels(i)?;
+            info!("suggested label for {i}");
             let suggested: YoloLabel = diff.suggested_label();
 
             let relabel_point = self.normal_dataset.points[i].add_prefix(prefix);

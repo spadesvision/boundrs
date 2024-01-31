@@ -73,6 +73,7 @@ struct LabelArgs {
 }
 
 fn main() {
+    env_logger::init();
     let args = Args::parse();
 
     match args.command {

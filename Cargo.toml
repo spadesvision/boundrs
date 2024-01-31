@@ -21,6 +21,10 @@ clap = { version = "4.1.8", features = ["derive"] }
 csv = "1.3.0"
 log = "0.4.20"
 itertools = "0.12.0"
+linfa-clustering = "0.7.0"
+linfa = "0.7.0"
+ndarray = "0.15.6"
+env_logger = "0.11.1"
 
 [profile.release]
 debug = true

@@ -1,6 +1,6 @@
 use anyhow::Result;
 use egui::*;
-use log::error;
+use log::{error, info};
 
 use crate::{
     dataset::{Datapoint, Dataset, DatasetMovement, DynLabel, DynLabelConfig, YoloBB, YoloLabel},
@@ -130,31 +130,6 @@ impl Relabeling {
             );
         }
     }
-    // pub fn update_texture(&mut self, ctx: &Context) {
-    //     let image = self.old_dataset.current_image().unwrap();
-    // self.image_texture = ctx.load_texture("my-image", image, egui::TextureOptions::LINEAR);
-    // }
-    // pub fn go(&mut self, movement: DatasetMovement, _ctx: &Context) {
-    //     // TODO actually check if labels match correctly, not only length
-    //     if movement == DatasetMovement::Next && self.new_label.len() != self.old_label.len() {
-    //         println!(
-    //             "Missing labels: len new {} vs len old {}",
-    //             self.new_label.len(),
-    //             self.old_label.len(),
-    //         );
-    //         return;
-    //     }
-    //     self.old_dataset
-    //         .go(movement.clone(), self.old_label.clone(), false)
-    //         .unwrap();
-    //     self.new_dataset
-    //         .go(movement, self.new_label.clone(), true)
-    //         .unwrap();
-    //     self.old_label = self.old_dataset.current_label().unwrap();
-    //     self.new_label = self.new_dataset.current_label().unwrap();
-    //     self.highlighted = self.find_next_highlighted();
-    //     // self.update_texture(ctx);
-    // }
     fn handle_left_right(&mut self, ui: &Ui, dataset: &mut Dataset, img_rect: Rect) {
         let next_pressed = ui.input(|i| i.key_pressed(egui::Key::ArrowRight));
         let previous_pressed = ui.input(|i| i.key_pressed(egui::Key::ArrowLeft));
@@ -165,12 +140,18 @@ impl Relabeling {
             _ => return,
         };
 
-        println!("trying to move dataset {movement:?}");
+        info!("trying to move dataset {movement:?}");
+
+        if movement == DatasetMovement::Next && self.new_label.len() != self.old_label.len() {
+            info!(
+                "Missing labels: len new {} vs len old {}",
+                self.new_label.len(),
+                self.old_label.len(),
+            );
+            return;
+        }
 
         if movement == DatasetMovement::Next && self.new_label.is_empty() {
-            self.save_state(dataset.current()).unwrap();
-            dataset.go(movement, None).unwrap();
-            self.refresh_state(dataset.current()).unwrap();
             self.repeat_bbs(dataset, img_rect).unwrap();
             return;
         }
@@ -178,7 +159,7 @@ impl Relabeling {
         dataset.go(movement, None).unwrap();
         self.refresh_state(dataset.current()).unwrap();
     }
-    fn handle_clear(&mut self, ctx: &Context, img_rect: Rect) {
+    fn handle_clear(&mut self, ctx: &Context) {
         let delete_pressed = ctx.input(|i| i.key_pressed(egui::Key::Delete));
         if delete_pressed {
             self.new_label = vec![];
@@ -223,14 +204,21 @@ impl Relabeling {
             {
                 self.save_state(dataset.current()).unwrap();
                 dataset.go(DatasetMovement::Next, None).unwrap();
+                self.refresh_state(dataset.current()).unwrap();
                 self.repeat_bbs(dataset, img_rect).unwrap();
             }
         }
     }
-    pub fn take_similar_bbs(&mut self, new_label_candidates: Vec<YoloLabel>, img_rect: Rect) {
+    pub fn take_similar_bbs(&mut self, datapoints: &[&Datapoint], img_rect: Rect) {
         self.new_label = vec![];
         for old_bbs in self.old_label.iter() {
-            for new_bbs in new_label_candidates.iter().flatten() {
+            let new_label_candidates = datapoints.iter().map(|p| {
+                p.remove_prefix(&self.old_prefix)
+                    .add_prefix(&self.new_prefix)
+                    .load_label()
+                    .unwrap()
+            });
+            for new_bbs in new_label_candidates.flatten() {
                 let old_rect = old_bbs.to_screen_rect(img_rect);
                 let new_rect = new_bbs.to_screen_rect(img_rect);
                 let intersect = old_rect.intersect(new_rect).area();
@@ -247,8 +235,8 @@ impl Relabeling {
         }
     }
     pub fn repeat_bbs(&mut self, dataset: &Dataset, img_rect: Rect) -> Result<()> {
-        let previous_labels = dataset.previous_labels(2)?;
-        self.take_similar_bbs(previous_labels, img_rect);
+        let previous = dataset.previous_datapoints(2);
+        self.take_similar_bbs(&previous, img_rect);
         self.highlighted = self.find_next_highlighted();
         Ok(())
     }
@@ -264,7 +252,7 @@ impl Relabeling {
     }
     pub fn handle_img_response(&mut self, img_response: &Response) {
         if img_response.secondary_clicked() {
-            println!("secondary clicked");
+            info!("secondary clicked");
             let screen_pos = img_response.interact_pointer_pos().unwrap();
             self.remove_bbs(screen_pos, img_response.rect);
         }
@@ -291,7 +279,7 @@ impl Tool for Relabeling {
             self.handle_class_keys(central_panel, img_response.rect, dataset);
 
             // Handle labels clearing
-            self.handle_clear(central_panel.ctx(), img_response.rect);
+            self.handle_clear(central_panel.ctx());
 
             // Handle right click
             self.handle_img_response(&img_response);

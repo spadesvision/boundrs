@@ -140,6 +140,9 @@ impl YoloBB {
             self.class_num, self.x, self.y, self.w, self.h
         )
     }
+    pub fn center(&self) -> [f32; 2] {
+        [self.x, self.y]
+    }
 
     pub fn iou(&self, other: &YoloBB) -> f32 {
         let rect_0_1: Rect = [[0.0, 0.0].into(), [1.0, 1.0].into()].into();
@@ -348,6 +351,14 @@ impl Dataset {
             .map(|back| {
                 let previous = self.i.saturating_sub(back);
                 self.data[previous].load_label()
+            })
+            .collect()
+    }
+    pub fn previous_datapoints(&self, num: usize) -> Vec<&Datapoint> {
+        (1..=num)
+            .map(|back| {
+                let previous = self.i.saturating_sub(back);
+                &self.data[previous]
             })
             .collect()
     }
