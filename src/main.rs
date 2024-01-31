@@ -180,7 +180,7 @@ impl BoundrsV2 {
             image_loading_spinners: false,
             ..Default::default()
         });
-        let dataset = Dataset::from_input_dir(&args.data_dir).unwrap();
+        let dataset = Dataset::with_prefix(&args.data_dir, &args.prefix).unwrap();
         // egui_extras::install_image_loaders(ctx);
         // ctx.add_image_loader(std::sync::Arc::new(
         //     egui_extras::image_loader::ImageCrateLoader::default(),

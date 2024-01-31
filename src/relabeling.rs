@@ -1,5 +1,6 @@
 use anyhow::Result;
 use egui::*;
+use log::error;
 
 use crate::{
     dataset::{Datapoint, Dataset, DatasetMovement, DynLabel, DynLabelConfig, YoloBB, YoloLabel},
@@ -96,8 +97,9 @@ impl Relabeling {
             self.draw_label_text(painter, text_pos, bb.class(&self.new_config));
         }
     }
-    fn find_next_highlighted(&mut self, img_rect: Rect) -> Option<usize> {
+    fn find_next_highlighted(&mut self) -> Option<usize> {
         // let size = self.img_rect.size();
+        let img_rect = Rect::from_min_size(Pos2::from([0.0, 0.0]), Vec2::from([1.0, 1.0]));
         self.old_label.sort_by(|a, b| a.x.total_cmp(&b.x));
         for (i, old_bbs) in self.old_label.iter().enumerate() {
             if self.new_label.iter().all(|new_bbs| {
@@ -113,7 +115,13 @@ impl Relabeling {
     }
     fn draw_highlight(&self, ui: &mut Ui, img_rect: Rect) {
         if let Some(highlighted) = self.highlighted {
-            let bb = &self.old_label[highlighted];
+            let Some(bb) = &self.old_label.get(highlighted) else {
+                error!(
+                    "highlighted is out of range {highlighted} >= {}",
+                    &self.old_label.len()
+                );
+                return;
+            };
             let screen_rect = bb.to_screen_rect(img_rect);
             ui.painter().rect_stroke(
                 screen_rect,
@@ -175,7 +183,7 @@ impl Relabeling {
         if delete_pressed {
             self.new_label = vec![];
         }
-        self.highlighted = self.find_next_highlighted(img_rect);
+        self.highlighted = self.find_next_highlighted();
     }
     fn new_class_pressed(&self, ui: &Ui) -> Option<usize> {
         // TODO fix this
@@ -208,7 +216,7 @@ impl Relabeling {
             // let new_class = CardSuit(card, suit);
             let new_bbs = YoloBB::from_rect(old_bbx.to_screen_rect(img_rect), img_rect, &new_class);
             self.new_label.push(new_bbs);
-            self.highlighted = self.find_next_highlighted(img_rect);
+            self.highlighted = self.find_next_highlighted();
             while self.new_label.len() == self.old_label.len()
                 && self.highlighted.is_none()
                 && self.auto_repeat
@@ -241,7 +249,7 @@ impl Relabeling {
     pub fn repeat_bbs(&mut self, dataset: &Dataset, img_rect: Rect) -> Result<()> {
         let previous_labels = dataset.previous_labels(2)?;
         self.take_similar_bbs(previous_labels, img_rect);
-        self.highlighted = self.find_next_highlighted(img_rect);
+        self.highlighted = self.find_next_highlighted();
         Ok(())
     }
     pub fn remove_labels(&mut self, pos: Pos2, img_rect: Rect) {
@@ -249,7 +257,7 @@ impl Relabeling {
         //     .retain(|label| !label.to_screen_rect(img_rect).contains(pos));
         self.new_label
             .retain(|label| !label.to_screen_rect(img_rect).contains(pos));
-        self.highlighted = self.find_next_highlighted(img_rect);
+        self.highlighted = self.find_next_highlighted();
     }
     fn remove_bbs(&mut self, pos: Pos2, img_rect: Rect) {
         self.remove_labels(pos, img_rect);
@@ -329,6 +337,7 @@ impl Tool for Relabeling {
             .add_prefix(&self.new_prefix)
             .load_label()
             .unwrap();
+        self.highlighted = self.find_next_highlighted();
         Ok(())
     }
 
