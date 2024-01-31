@@ -151,10 +151,6 @@ impl Relabeling {
             return;
         }
 
-        if movement == DatasetMovement::Next && self.new_label.is_empty() {
-            self.repeat_bbs(dataset, img_rect).unwrap();
-            return;
-        }
         self.save_state(dataset.current()).unwrap();
         dataset.go(movement, None).unwrap();
         self.refresh_state(dataset.current()).unwrap();
