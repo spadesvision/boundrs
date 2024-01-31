@@ -70,6 +70,9 @@ struct LabelArgs {
 
     #[arg(short, long)]
     conflicts_dir: Option<PathBuf>,
+
+    #[arg(short, long)]
+    start: Option<usize>,
 }
 
 fn main() {
@@ -181,7 +184,10 @@ impl BoundrsV2 {
             image_loading_spinners: false,
             ..Default::default()
         });
-        let dataset = Dataset::with_prefix(&args.data_dir, &args.prefix).unwrap();
+        let mut dataset = Dataset::with_prefix(&args.data_dir, &args.prefix).unwrap();
+        if let Some(start) = args.start {
+            dataset.go(DatasetMovement::JumpTo(start), None).unwrap();
+        }
         // egui_extras::install_image_loaders(ctx);
         // ctx.add_image_loader(std::sync::Arc::new(
         //     egui_extras::image_loader::ImageCrateLoader::default(),
