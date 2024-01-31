@@ -48,7 +48,7 @@ impl Relabeling {
             new_config,
             old_label,
             new_label,
-            repeat_iou: 0.87,
+            repeat_iou: 0.83,
             auto_repeat: true,
         }
         // TODO how could we handle this?
@@ -154,6 +154,9 @@ impl Relabeling {
         self.save_state(dataset.current()).unwrap();
         dataset.go(movement, None).unwrap();
         self.refresh_state(dataset.current()).unwrap();
+        if next_pressed && self.new_label.is_empty() {
+            self.repeat_bbs(dataset, img_rect).unwrap();
+        }
     }
     fn handle_clear(&mut self, ctx: &Context) {
         let delete_pressed = ctx.input(|i| i.key_pressed(egui::Key::Delete));
