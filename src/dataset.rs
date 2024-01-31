@@ -355,7 +355,7 @@ impl Dataset {
             .collect()
     }
     pub fn previous_datapoints(&self, num: usize) -> Vec<&Datapoint> {
-        (1..=num)
+        (0..=num)
             .map(|back| {
                 let previous = self.i.saturating_sub(back);
                 &self.data[previous]

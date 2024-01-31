@@ -24,6 +24,8 @@ pub struct Labeling {
     mask_needs_update: bool,
     bbox_input: BBoxInput,
     repeat_mode: bool,
+    region_delete_mode: bool,
+    past_delete: usize,
     current_class: DynLabel,
     filter_opacity: u8,
     shown_classes: HashSet<usize>,
@@ -43,6 +45,8 @@ impl Labeling {
             mask_needs_update: false,
             bbox_input: BBoxInput::None,
             repeat_mode: false,
+            region_delete_mode: false,
+            past_delete: 10,
             current_class,
             filter_opacity: 220,
             shown_classes: HashSet::new(),
@@ -59,20 +63,15 @@ impl Labeling {
         self.filter = Some(ctx.load_texture("mask", mask, egui::TextureOptions::LINEAR));
         self.mask_needs_update = false;
     }
-    pub fn remove_labels(&mut self, pos: Pos2, img_rect: Rect) {
+    fn remove_labels(&mut self, pos: Pos2, img_rect: Rect) {
         self.current_label
             .retain(|label| !label.to_screen_rect(img_rect).contains(pos));
     }
-    pub fn add_bb(&mut self, bb: YoloBB) {
+    fn add_bb(&mut self, bb: YoloBB) {
         self.current_label.push(bb)
     }
 
-    pub fn repeat_bbs_inside(
-        &mut self,
-        rect: Rect,
-        img_rect: Rect,
-        dataset: &Dataset,
-    ) -> Result<()> {
+    fn repeat_bbs_inside(&mut self, rect: Rect, img_rect: Rect, dataset: &Dataset) -> Result<()> {
         // get two coordinates to repeat only the labels completely in this box
         let prev_label = dataset.previous_labels(1)?[0].clone();
         let prev_label_inside = prev_label
@@ -85,6 +84,21 @@ impl Labeling {
             .filter(|l| !rect.contains_rect(l.to_screen_rect(img_rect)))
             .chain(prev_label_inside)
             .collect();
+        Ok(())
+    }
+    fn delete_bbs_touching(
+        &mut self,
+        rect: Rect,
+        img_rect: Rect,
+        past: usize,
+        dataset: &Dataset,
+    ) -> Result<()> {
+        // get two coordinates to repeat only the labels completely in this box
+        for datapoint in dataset.previous_datapoints(past) {
+            let mut prev_label = datapoint.load_label()?;
+            prev_label.retain(|label| !rect.intersects(label.to_screen_rect(img_rect)));
+            datapoint.save_label(prev_label)?;
+        }
         Ok(())
     }
     fn remove_bbs(&mut self, pos: Pos2, img_rect: Rect) {
@@ -184,6 +198,10 @@ impl Labeling {
                     .unwrap();
                 self.repeat_mode = false;
                 self.bbox_input = BBoxInput::None
+            } else if self.region_delete_mode {
+                let rect = Rect::from_two_pos(pos1, pos2);
+                self.delete_bbs_touching(rect, img_response.rect, self.past_delete, dataset)
+                    .unwrap();
             } else {
                 let img_rect = img_response.rect;
                 let label_rect = Rect::from_two_pos(pos1, pos2);
@@ -279,6 +297,17 @@ impl Tool for Labeling {
                 self.mask_needs_update = true;
             }
         });
+        ui.vertical(|ui| {
+            ui.add(Checkbox::new(
+                &mut self.region_delete_mode,
+                "Region delete Mode",
+            ));
+            ui.add(Checkbox::new(&mut self.repeat_mode, "Repeat Mode"));
+        });
+        ui.horizontal(|ui| {
+            ui.label("Past delete");
+            ui.add(DragValue::new(&mut self.past_delete));
+        });
         ui.horizontal(|ui| {
             ui.label("Shown classes:");
             // TODO sort this by enum order and properly implement display or smth
@@ -351,6 +380,15 @@ impl Tool for Labeling {
             // Handle repeat button
             if central_panel.input(|i| i.key_pressed(Key::R)) {
                 self.repeat_mode = !self.repeat_mode;
+            }
+            if central_panel.input_mut(|i| {
+                i.consume_shortcut(&KeyboardShortcut {
+                    modifiers: Modifiers::CTRL,
+                    key: Key::D,
+                })
+            }) {
+                self.repeat_mode = false;
+                self.region_delete_mode = !self.region_delete_mode;
             }
 
             self.handle_left_right(central_panel, dataset);

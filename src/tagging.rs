@@ -1,6 +1,7 @@
 use std::{fs::OpenOptions, path::PathBuf};
 
-use egui::Ui;
+use egui::{Key, KeyboardShortcut, Modifiers, Ui};
+use log::info;
 use serde::{Deserialize, Serialize};
 
 use anyhow::Result;
@@ -19,6 +20,7 @@ struct TagEntry {
 #[derive(Default)]
 pub struct Tagging {
     data: TaggingToolData,
+    previous_tag: Option<String>,
 }
 
 #[derive(Default)]
@@ -33,11 +35,12 @@ impl TaggingToolData {
         ui.horizontal_wrapped(|ui| {
             let mut to_remove = None;
             for (index, tag) in self.current_tags.iter().enumerate() {
-                if ui.button(tag).clicked() && ui.button(tag).secondary_clicked() {
+                if ui.button(tag).secondary_clicked() {
                     to_remove = Some(index);
                 }
             }
             if let Some(index) = to_remove {
+                info!("Removing tag nr {index}");
                 self.current_tags.remove(index);
             }
         });
@@ -128,6 +131,7 @@ impl Tagging {
         if ui.input(|i| i.key_pressed(egui::Key::Enter)) {
             println!("Adding tag {}", self.data.input);
             self.data.current_tags.push(self.data.input.clone());
+            self.previous_tag = Some(self.data.input.clone());
             self.data.input = "".to_string();
         }
         Ok(())
@@ -149,6 +153,13 @@ impl Tagging {
         dataset.go(movement, None).unwrap();
         self.refresh_state(dataset.current()).unwrap();
     }
+
+    fn repeat_tags(&mut self) {
+        info!("Repeating tags");
+        if let Some(prev_tag) = &self.previous_tag {
+            self.data.current_tags.push(prev_tag.clone())
+        }
+    }
 }
 
 impl Tool for Tagging {
@@ -164,6 +175,14 @@ impl Tool for Tagging {
     ) -> anyhow::Result<()> {
         if img_response.has_focus() {
             self.handle_left_right(central_panel, dataset)
+        }
+        if central_panel.input_mut(|i| {
+            i.consume_shortcut(&KeyboardShortcut {
+                modifiers: Modifiers::NONE,
+                key: Key::R,
+            })
+        }) {
+            self.repeat_tags()
         }
         Ok(())
     }
