@@ -25,6 +25,8 @@ linfa-clustering = "0.7.0"
 linfa = "0.7.0"
 ndarray = "0.15.6"
 env_logger = "0.11.1"
+bje_detections = { version = "0.1.0", path = "../bjrs/bje_detections" }
+bje_datasets = { version = "0.1.0", path = "../bjrs/bje_datasets" }
 
 [profile.release]
 debug = true

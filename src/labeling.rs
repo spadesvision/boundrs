@@ -1,9 +1,10 @@
 use anyhow::Result;
+use bje_detections::Detections;
 use egui::{Key, *};
 use std::collections::HashSet;
 
 use crate::{
-    dataset::{Datapoint, Dataset, DatasetMovement, DynLabel, DynLabelConfig, YoloBB, YoloLabel},
+    dataset::{BoundrsDetection, Dataset, DatasetMovement, DynLabel, DynLabelConfig, LabelOnDisk},
     Tool,
 };
 use image::{Rgba, RgbaImage};
@@ -15,11 +16,9 @@ enum BBoxInput {
     Finished(Pos2, Pos2),
 }
 
-pub struct Labeling {
+pub struct Labeling<D: BoundrsDetection> {
     label_config: DynLabelConfig,
-    // zoom: f32,
-    // TODO move this to main app, pass new texture out of label / relabel function
-    current_label: YoloLabel,
+    current_label: Detections<D>,
     filter: Option<egui::TextureHandle>,
     mask_needs_update: bool,
     bbox_input: BBoxInput,
@@ -32,8 +31,8 @@ pub struct Labeling {
     last_time: f64,
 }
 
-impl Labeling {
-    pub fn new(label_config: DynLabelConfig, initial: &Datapoint) -> Self {
+impl<D: BoundrsDetection> Labeling<D> {
+    pub fn new(label_config: DynLabelConfig, initial: &LabelOnDisk<D>) -> Self {
         let current_class = label_config
             .label_from_usize(0)
             .expect("At least 1 label is needed");
@@ -65,13 +64,19 @@ impl Labeling {
     }
     fn remove_labels(&mut self, pos: Pos2, img_rect: Rect) {
         self.current_label
+            .0
             .retain(|label| !label.to_screen_rect(img_rect).contains(pos));
     }
-    fn add_bb(&mut self, bb: YoloBB) {
-        self.current_label.push(bb)
+    fn add_bb(&mut self, bb: D) {
+        self.current_label.0.push(bb)
     }
 
-    fn repeat_bbs_inside(&mut self, rect: Rect, img_rect: Rect, dataset: &Dataset) -> Result<()> {
+    fn repeat_bbs_inside(
+        &mut self,
+        rect: Rect,
+        img_rect: Rect,
+        dataset: &Dataset<D>,
+    ) -> Result<()> {
         // get two coordinates to repeat only the labels completely in this box
         let prev_label = dataset.previous_labels(1)?[0].clone();
         let prev_label_inside = prev_label
@@ -91,12 +96,14 @@ impl Labeling {
         rect: Rect,
         img_rect: Rect,
         past: usize,
-        dataset: &Dataset,
+        dataset: &Dataset<D>,
     ) -> Result<()> {
         // get two coordinates to repeat only the labels completely in this box
         for datapoint in dataset.previous_datapoints(past) {
             let mut prev_label = datapoint.load_label()?;
-            prev_label.retain(|label| !rect.intersects(label.to_screen_rect(img_rect)));
+            prev_label
+                .0
+                .retain(|label| !rect.intersects(label.to_screen_rect(img_rect)));
             datapoint.save_label(prev_label)?;
         }
         Ok(())
@@ -152,7 +159,7 @@ impl Labeling {
             Color32::BLACK,
         );
     }
-    fn handle_img_response(&mut self, img_response: &Response, ui: &mut Ui, dataset: &Dataset) {
+    fn handle_img_response(&mut self, img_response: &Response, ui: &mut Ui, dataset: &Dataset<D>) {
         if img_response.secondary_clicked() {
             let screen_pos = img_response.interact_pointer_pos().unwrap();
             self.remove_bbs(screen_pos, img_response.rect);
@@ -183,7 +190,7 @@ impl Labeling {
             BBoxInput::Finished(pos1, pos2) => {
                 let img_rect = img_response.rect;
                 let label_rect = Rect::from_two_pos(pos1, pos2);
-                let label = YoloBB::from_rect(label_rect, img_rect, &self.current_class);
+                let label = D::from_rect(label_rect, img_rect, &self.current_class);
                 println!("{label:?}");
                 self.add_bb(label);
                 self.mask_needs_update = true;
@@ -205,7 +212,7 @@ impl Labeling {
             } else {
                 let img_rect = img_response.rect;
                 let label_rect = Rect::from_two_pos(pos1, pos2);
-                let label = YoloBB::from_rect(label_rect, img_rect, &self.current_class);
+                let label = D::from_rect(label_rect, img_rect, &self.current_class);
                 println!("{label:?}");
                 self.add_bb(label);
                 self.mask_needs_update = true;
@@ -236,7 +243,7 @@ impl Labeling {
             }
         }
     }
-    fn handle_left_right(&mut self, ui: &Ui, dataset: &mut Dataset) {
+    fn handle_left_right(&mut self, ui: &Ui, dataset: &mut Dataset<D>) {
         let next_pressed = ui.input(|i| i.key_pressed(egui::Key::ArrowRight));
         let previous_pressed = ui.input(|i| i.key_pressed(egui::Key::ArrowLeft));
 
@@ -255,13 +262,17 @@ impl Labeling {
 }
 
 #[inline]
-fn pos_inside_label_box(label: &YoloLabel, pos: Pos2, img_rect: Rect) -> bool {
+fn pos_inside_label_box<D: BoundrsDetection>(
+    label: &Detections<D>,
+    pos: Pos2,
+    img_rect: Rect,
+) -> bool {
     label
         .iter()
         .any(|l| l.to_screen_rect(img_rect).contains(pos))
 }
-fn generate_mask(
-    label: &YoloLabel,
+fn generate_mask<D: BoundrsDetection>(
+    label: &Detections<D>,
     shown_classes: &HashSet<usize>,
     img_rect: Rect,
     opacity: u8,
@@ -269,7 +280,7 @@ fn generate_mask(
     let highlighted_label = label
         .iter()
         .cloned()
-        .filter(|bb| shown_classes.contains(&bb.class_num))
+        .filter(|bb| shown_classes.contains(&bb.class_num()))
         .collect();
     let width = img_rect.width() as usize;
     let height = img_rect.height() as usize;
@@ -286,7 +297,7 @@ fn generate_mask(
     ColorImage::from_rgba_unmultiplied([width, height], pixels.as_slice())
 }
 
-impl Tool for Labeling {
+impl<D: BoundrsDetection> Tool<D> for Labeling<D> {
     fn draw_ui(&mut self, ui: &mut Ui) -> Result<()> {
         ui.horizontal(|ui| {
             ui.label("Filter opacity");
@@ -343,7 +354,7 @@ impl Tool for Labeling {
         &mut self,
         central_panel: &mut Ui,
         img_response: Response,
-        dataset: &mut Dataset,
+        dataset: &mut Dataset<D>,
     ) -> Result<()> {
         if self.mask_needs_update && self.filter.is_some() {
             self.set_mask(central_panel.ctx(), img_response.rect)
@@ -395,12 +406,12 @@ impl Tool for Labeling {
         }
         Ok(())
     }
-    fn refresh_state(&mut self, datapoint: &Datapoint) -> Result<()> {
+    fn refresh_state(&mut self, datapoint: &LabelOnDisk<D>) -> Result<()> {
         self.current_label = datapoint.load_label()?;
         self.mask_needs_update = self.filter.is_some();
         Ok(())
     }
-    fn save_state(&self, datapoint: &Datapoint) -> Result<()> {
+    fn save_state(&self, datapoint: &LabelOnDisk<D>) -> Result<()> {
         datapoint.save_label(self.current_label.clone())
     }
 

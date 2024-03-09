@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 use anyhow::Result;
 
 use crate::{
-    dataset::{Dataset, DatasetMovement},
+    dataset::{BoundrsDetection, Dataset, DatasetMovement, LabelOnDisk},
     Tool,
 };
 
@@ -79,7 +79,6 @@ impl TaggingToolData {
     }
     fn save_tags(&self, current_label_jpg: &str) -> Result<()> {
         let file = OpenOptions::new()
-            .write(true)
             .append(true)
             .create(true) // Creates the file if it does not exist
             .open("tags.csv")?;
@@ -139,7 +138,7 @@ impl Tagging {
         //     });
         // Ok(())
     }
-    fn handle_left_right(&mut self, ui: &Ui, dataset: &mut Dataset) {
+    fn handle_left_right<D: BoundrsDetection>(&mut self, ui: &Ui, dataset: &mut Dataset<D>) {
         let next_pressed = ui.input(|i| i.key_pressed(egui::Key::ArrowRight));
         let previous_pressed = ui.input(|i| i.key_pressed(egui::Key::ArrowLeft));
 
@@ -162,7 +161,7 @@ impl Tagging {
     }
 }
 
-impl Tool for Tagging {
+impl<D: BoundrsDetection> Tool<D> for Tagging {
     fn draw_ui(&mut self, ui: &mut Ui) -> anyhow::Result<()> {
         self.draw_ui(ui)
     }
@@ -171,7 +170,7 @@ impl Tool for Tagging {
         &mut self,
         central_panel: &mut Ui,
         img_response: egui::Response,
-        dataset: &mut crate::dataset::Dataset,
+        dataset: &mut crate::dataset::Dataset<D>,
     ) -> anyhow::Result<()> {
         if img_response.has_focus() {
             self.handle_left_right(central_panel, dataset)
@@ -187,11 +186,11 @@ impl Tool for Tagging {
         Ok(())
     }
 
-    fn refresh_state(&mut self, datapoint: &crate::dataset::Datapoint) -> anyhow::Result<()> {
+    fn refresh_state(&mut self, datapoint: &LabelOnDisk<D>) -> anyhow::Result<()> {
         self.data.load_tags(datapoint.img_name())
     }
 
-    fn save_state(&self, datapoint: &crate::dataset::Datapoint) -> anyhow::Result<()> {
+    fn save_state(&self, datapoint: &LabelOnDisk<D>) -> anyhow::Result<()> {
         self.data.save_tags(datapoint.img_name())
     }
 

@@ -1,9 +1,12 @@
 use std::path::PathBuf;
 
-use crate::dataset::{Dataset, DynLabelConfig};
+use crate::dataset::{BoundrsDetection, Dataset, DynLabelConfig};
+use bje_detections::{Detections, YoloBBox};
 use itertools::iproduct;
 
-use crate::dataset::{YoloBB, YoloLabel};
+// use crate::dataset::{YoloBBox, YoloLabel};
+
+type YoloLabel = Detections<YoloBBox>;
 
 pub struct LabelDiff<'a, 'b> {
     pub a: &'a YoloLabel,
@@ -12,21 +15,23 @@ pub struct LabelDiff<'a, 'b> {
 }
 
 impl<'a, 'b> LabelDiff<'a, 'b> {
-    pub fn class_differences_itersection(&self) -> impl Iterator<Item = (&YoloBB, &YoloBB)> + '_ {
+    pub fn class_differences_itersection(
+        &self,
+    ) -> impl Iterator<Item = (&YoloBBox, &YoloBBox)> + '_ {
         // Only iterate the intersection, so the order doesn't matter
         self.intersection()
-            .filter(|(a_bb, b_bb)| a_bb.class_num != b_bb.class_num)
+            .filter(|(a_bb, b_bb)| a_bb.class != b_bb.class)
     }
-    pub fn intersection(&self) -> impl Iterator<Item = (&YoloBB, &YoloBB)> + '_ {
+    pub fn intersection(&self) -> impl Iterator<Item = (&YoloBBox, &YoloBBox)> + '_ {
         // Only iterate the intersection, so the order doesn't matter
         iproduct!(self.a, self.b).filter(|(a_bb, b_bb)| a_bb.iou(b_bb) > self.thresh)
     }
-    pub fn only_in_a(&self) -> impl Iterator<Item = &YoloBB> + '_ {
+    pub fn only_in_a(&self) -> impl Iterator<Item = &YoloBBox> + '_ {
         self.a
             .iter()
             .filter(|a| self.b.iter().all(|b| a.iou(b) < self.thresh))
     }
-    pub fn only_in_b(&self) -> impl Iterator<Item = &YoloBB> + '_ {
+    pub fn only_in_b(&self) -> impl Iterator<Item = &YoloBBox> + '_ {
         self.b
             .iter()
             .filter(|b| self.a.iter().all(|a| b.iou(a) < self.thresh))

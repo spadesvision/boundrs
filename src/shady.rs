@@ -1,12 +1,15 @@
 use anyhow::Result;
+use bje_detections::{Card, Detection, Detections, YoloBBox};
 use itertools::Itertools;
 use log::{info, warn};
 
-use crate::{
-    check::LabelDiff,
-    dataset::{Datapoint, DynLabelConfig, YoloBB, YoloLabel},
-};
+use crate::dataset::{BoundrsDetection, LabelOnDisk};
+use crate::{check::LabelDiff, dataset::DynLabelConfig};
 use std::{fmt::Display, fs, path::PathBuf};
+
+// TODO refactor this to be more general and use Detections<D: Detection>
+
+type YoloLabel = Detections<YoloBBox>;
 
 #[derive(Debug, Clone, PartialEq)]
 enum Model {
@@ -34,15 +37,15 @@ struct Metadata {
     augmentation: Augmentation,
 }
 
-struct Dataset {
+struct Dataset<D: BoundrsDetection> {
     name: String,
-    points: Vec<Datapoint>,
+    points: Vec<LabelOnDisk<D>>,
     metadata: Metadata,
     #[allow(dead_code)]
     config: DynLabelConfig,
 }
 
-impl Dataset {
+impl<D: BoundrsDetection> Dataset<D> {
     fn from_dir(subdir: &PathBuf) -> Result<Self> {
         let dirname = subdir.file_name().unwrap().to_str().unwrap();
         let model = if dirname.contains("yolov7") {
@@ -85,13 +88,13 @@ impl Dataset {
         })
     }
 
-    fn load_points(labels_dir: &PathBuf) -> Result<Vec<Datapoint>> {
+    fn load_points(labels_dir: &PathBuf) -> Result<Vec<LabelOnDisk<D>>> {
         let mut data = vec![];
         let jpg_glob = format!("{}/*.txt", labels_dir.to_str().unwrap());
         let mut paths: Vec<_> = glob::glob(&jpg_glob)?.filter_map(Result::ok).collect();
         alphanumeric_sort::sort_path_slice(&mut paths);
         for img_src in paths.into_iter() {
-            data.push(Datapoint::new(img_src, labels_dir.to_path_buf()))
+            data.push(LabelOnDisk::new(img_src, labels_dir.to_path_buf()))
         }
         if data.is_empty() {
             return Err(anyhow::anyhow!(
@@ -102,15 +105,15 @@ impl Dataset {
     }
 }
 
-impl Display for Dataset {
+impl<D: BoundrsDetection> Display for Dataset<D> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.name)
     }
 }
 
 pub struct ShadyFinder {
-    normal_dataset: Dataset,
-    augmented: Vec<Dataset>,
+    normal_dataset: Dataset<YoloBBox>,
+    augmented: Vec<Dataset<YoloBBox>>,
 }
 
 struct MultipleLabels {
@@ -129,7 +132,7 @@ impl MultipleLabels {
         self.labels
             .iter()
             .flat_map(|(l, _)| l.iter())
-            .map(|bbox| bbox.center())
+            .map(|bbox| bbox.bbox_center())
     }
     fn do_dbscan(&self) {
         let min_points = 2;
@@ -179,20 +182,22 @@ impl MultipleLabels {
             let diff = LabelDiff::new(yolov7_base, suit_label, 0.95);
             let mut label = vec![];
             for (value_box, suit_box) in diff.intersection() {
-                let mut value_suit: YoloBB = *value_box;
+                let mut value_suit: YoloBBox = *value_box;
                 // TODO abstract this transformation computation away, we do this multiple times in this codebase.
                 // Should be somehow specified in the config
-                let suit_class = suit_box.class_num % 4;
-                let value_class = value_box.class_num % 13;
-                value_suit.class_num = suit_class * 13 + value_class;
+                let suit_class = suit_box.class_num() % 4;
+                let value_class = value_box.class_num() % 13;
+                value_suit.class = Card::from_usize(suit_class * 13 + value_class).unwrap();
                 label.push(value_suit)
             }
             suggestions.push(label);
         }
-        suggestions
-            .into_iter()
-            .max_by_key(|l| l.len())
-            .expect("there should be a only suit model for suggested_label")
+        Detections(
+            suggestions
+                .into_iter()
+                .max_by_key(|l| l.len())
+                .expect("there should be a only suit model for suggested_label"),
+        )
     }
 }
 

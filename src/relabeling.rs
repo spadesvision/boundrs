@@ -1,14 +1,15 @@
 use anyhow::Result;
+use bje_detections::Detections;
 use egui::*;
 use log::{error, info};
 
 use crate::{
-    dataset::{Datapoint, Dataset, DatasetMovement, DynLabel, DynLabelConfig, YoloBB, YoloLabel},
+    dataset::{BoundrsDetection, Dataset, DatasetMovement, DynLabel, DynLabelConfig, LabelOnDisk},
     Tool,
 };
 // use image::{Rgba, RgbaImage};
 
-pub struct Relabeling {
+pub struct Relabeling<D: BoundrsDetection> {
     // index of currently editing label in old_label
     highlighted: Option<usize>,
 
@@ -17,19 +18,19 @@ pub struct Relabeling {
     // image_texture: egui::TextureHandle,
     old_config: DynLabelConfig,
     new_config: DynLabelConfig,
-    old_label: YoloLabel,
-    new_label: YoloLabel,
+    old_label: Detections<D>,
+    new_label: Detections<D>,
     repeat_iou: f32,
     auto_repeat: bool,
 }
 
-impl Relabeling {
+impl<D: BoundrsDetection> Relabeling<D> {
     pub fn new(
         old_prefix: &str,
         new_prefix: &str,
         old_config: DynLabelConfig,
         new_config: DynLabelConfig,
-        initial: &Datapoint,
+        initial: &LabelOnDisk<D>,
     ) -> Self {
         // let image = old_dataset.current_image().unwrap();
         // let image_texture = ctx.load_texture("my-image", image, egui::TextureOptions::LINEAR);
@@ -51,20 +52,7 @@ impl Relabeling {
             repeat_iou: 0.83,
             auto_repeat: true,
         }
-        // TODO how could we handle this?
-        // relabeling.highlighted = relabeling.find_next_highlighted();
     }
-    // pub fn draw_img(&mut self, ui: &mut Ui) -> Response {
-    //     let img_response = ui.add(
-    //         egui::Image::new(
-    //             &self.image_texture,
-    //             self.image_texture.size_vec2() * self.zoom,
-    //         )
-    //         .sense(Sense::click_and_drag()),
-    //     );
-    //     self.img_rect = img_response.rect;
-    //     img_response
-    // }
     fn draw_label_text(&self, painter: &Painter, text_pos: Pos2, class: DynLabel) {
         painter.rect(
             Rect::from_two_pos(text_pos, text_pos + [40.0, -35.0].into()),
@@ -100,7 +88,7 @@ impl Relabeling {
     fn find_next_highlighted(&mut self) -> Option<usize> {
         // let size = self.img_rect.size();
         let img_rect = Rect::from_min_size(Pos2::from([0.0, 0.0]), Vec2::from([1.0, 1.0]));
-        self.old_label.sort_by(|a, b| a.x.total_cmp(&b.x));
+        self.old_label.0.sort_by(|a, b| a.x().total_cmp(&b.x()));
         for (i, old_bbs) in self.old_label.iter().enumerate() {
             if self.new_label.iter().all(|new_bbs| {
                 let old_rect = old_bbs.to_screen_rect(img_rect);
@@ -115,10 +103,10 @@ impl Relabeling {
     }
     fn draw_highlight(&self, ui: &mut Ui, img_rect: Rect) {
         if let Some(highlighted) = self.highlighted {
-            let Some(bb) = &self.old_label.get(highlighted) else {
+            let Some(bb) = &self.old_label.0.get(highlighted) else {
                 error!(
                     "highlighted is out of range {highlighted} >= {}",
-                    &self.old_label.len()
+                    &self.old_label.0.len()
                 );
                 return;
             };
@@ -130,7 +118,7 @@ impl Relabeling {
             );
         }
     }
-    fn handle_left_right(&mut self, ui: &Ui, dataset: &mut Dataset, img_rect: Rect) {
+    fn handle_left_right(&mut self, ui: &Ui, dataset: &mut Dataset<D>, img_rect: Rect) {
         let next_pressed = ui.input(|i| i.key_pressed(egui::Key::ArrowRight));
         let previous_pressed = ui.input(|i| i.key_pressed(egui::Key::ArrowLeft));
 
@@ -142,11 +130,11 @@ impl Relabeling {
 
         info!("trying to move dataset {movement:?}");
 
-        if movement == DatasetMovement::Next && self.new_label.len() != self.old_label.len() {
+        if movement == DatasetMovement::Next && self.new_label.0.len() != self.old_label.0.len() {
             info!(
                 "Missing labels: len new {} vs len old {}",
-                self.new_label.len(),
-                self.old_label.len(),
+                self.new_label.0.len(),
+                self.old_label.0.len(),
             );
             return;
         }
@@ -154,14 +142,14 @@ impl Relabeling {
         self.save_state(dataset.current()).unwrap();
         dataset.go(movement, None).unwrap();
         self.refresh_state(dataset.current()).unwrap();
-        if next_pressed && self.new_label.is_empty() {
+        if next_pressed && self.new_label.0.is_empty() {
             self.repeat_bbs(dataset, img_rect).unwrap();
         }
     }
     fn handle_clear(&mut self, ctx: &Context) {
         let delete_pressed = ctx.input(|i| i.key_pressed(egui::Key::Delete));
         if delete_pressed {
-            self.new_label = vec![];
+            self.new_label = Detections::new_empty();
         }
         self.highlighted = self.find_next_highlighted();
     }
@@ -182,11 +170,11 @@ impl Relabeling {
         })
     }
 
-    pub fn handle_class_keys(&mut self, ui: &Ui, img_rect: Rect, dataset: &mut Dataset) {
+    pub fn handle_class_keys(&mut self, ui: &Ui, img_rect: Rect, dataset: &mut Dataset<D>) {
         if let (Some(suit_usize), Some(highlighted)) =
             (self.new_class_pressed(ui), self.highlighted)
         {
-            let old_bbx = self.old_label[highlighted];
+            let old_bbx = self.old_label.0[highlighted];
             // let class = old_bbx.class(&self.old_config);
             // let card = Card::from_usize(class.0);
             let new_class = self
@@ -194,10 +182,10 @@ impl Relabeling {
                 .label_from_usize(suit_usize * 13 + old_bbx.class(&self.old_config).i % 13)
                 .expect("Remap issue, usize to high");
             // let new_class = CardSuit(card, suit);
-            let new_bbs = YoloBB::from_rect(old_bbx.to_screen_rect(img_rect), img_rect, &new_class);
-            self.new_label.push(new_bbs);
+            let new_bbs = D::from_rect(old_bbx.to_screen_rect(img_rect), img_rect, &new_class);
+            self.new_label.0.push(new_bbs);
             self.highlighted = self.find_next_highlighted();
-            while self.new_label.len() == self.old_label.len()
+            while self.new_label.0.len() == self.old_label.0.len()
                 && self.highlighted.is_none()
                 && self.auto_repeat
             {
@@ -208,8 +196,8 @@ impl Relabeling {
             }
         }
     }
-    pub fn take_similar_bbs(&mut self, datapoints: &[&Datapoint], img_rect: Rect) {
-        self.new_label = vec![];
+    pub fn take_similar_bbs(&mut self, datapoints: &[&LabelOnDisk<D>], img_rect: Rect) {
+        self.new_label = Detections::new_empty();
         for old_bbs in self.old_label.iter() {
             let new_label_candidates = datapoints.iter().map(|p| {
                 p.remove_prefix(&self.old_prefix)
@@ -224,16 +212,16 @@ impl Relabeling {
                 let union = old_rect.union(new_rect).area();
                 let iou = intersect / union;
                 // TODO generalize, probably from config
-                if iou > self.repeat_iou && old_bbs.class_num == new_bbs.class_num % 13 {
+                if iou > self.repeat_iou && old_bbs.class_num() == new_bbs.class_num() % 13 {
                     let new_label =
-                        YoloBB::from_rect(old_rect, img_rect, &new_bbs.class(&self.new_config));
-                    self.new_label.push(new_label);
+                        D::from_rect(old_rect, img_rect, &new_bbs.class(&self.new_config));
+                    self.new_label.0.push(new_label);
                     break;
                 }
             }
         }
     }
-    pub fn repeat_bbs(&mut self, dataset: &Dataset, img_rect: Rect) -> Result<()> {
+    pub fn repeat_bbs(&mut self, dataset: &Dataset<D>, img_rect: Rect) -> Result<()> {
         let previous = dataset.previous_datapoints(2);
         self.take_similar_bbs(&previous, img_rect);
         self.highlighted = self.find_next_highlighted();
@@ -243,6 +231,7 @@ impl Relabeling {
         // self.old_label
         //     .retain(|label| !label.to_screen_rect(img_rect).contains(pos));
         self.new_label
+            .0
             .retain(|label| !label.to_screen_rect(img_rect).contains(pos));
         self.highlighted = self.find_next_highlighted();
     }
@@ -258,12 +247,12 @@ impl Relabeling {
     }
 }
 
-impl Tool for Relabeling {
+impl<D: BoundrsDetection> Tool<D> for Relabeling<D> {
     fn draw_in_central_panel(
         &mut self,
         central_panel: &mut Ui,
         img_response: Response,
-        dataset: &mut Dataset,
+        dataset: &mut Dataset<D>,
     ) -> Result<()> {
         // Draw bbs
         self.draw_bbs(central_panel, img_response.rect);
@@ -317,7 +306,7 @@ impl Tool for Relabeling {
         "Relabeling"
     }
 
-    fn refresh_state(&mut self, datapoint: &Datapoint) -> anyhow::Result<()> {
+    fn refresh_state(&mut self, datapoint: &LabelOnDisk<D>) -> anyhow::Result<()> {
         self.old_label = datapoint.load_label()?;
         self.new_label = datapoint
             .remove_prefix(&self.old_prefix)
@@ -328,7 +317,7 @@ impl Tool for Relabeling {
         Ok(())
     }
 
-    fn save_state(&self, datapoint: &Datapoint) -> anyhow::Result<()> {
+    fn save_state(&self, datapoint: &LabelOnDisk<D>) -> anyhow::Result<()> {
         let new_datapoint = datapoint
             .remove_prefix(&self.old_prefix)
             .add_prefix(&self.new_prefix);

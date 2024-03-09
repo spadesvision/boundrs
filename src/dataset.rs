@@ -1,4 +1,4 @@
-use anyhow::{anyhow, Error, Result};
+use anyhow::{anyhow, Result};
 use egui::*;
 use glob::glob;
 use serde::Deserialize;
@@ -7,11 +7,11 @@ use serde::Deserialize;
 // use serde_json;
 use std::collections::HashSet;
 use std::fs::File;
-use std::io::prelude::*;
+use std::marker::PhantomData;
 use std::path::{Path, PathBuf};
-use std::str::FromStr;
+// use std::str::FromStr;
 
-use log::debug;
+use bje_detections::{Card, Detection, Detections, YoloBBox};
 
 #[derive(Deserialize, Clone)]
 pub struct DynLabelSpec {
@@ -104,63 +104,60 @@ pub struct DynLabel {
     pub keys: HashSet<Key>,
 }
 
-pub type YoloLabel = Vec<YoloBB>;
-
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub struct YoloBB {
-    pub class_num: usize,
-    pub x: f32,
-    y: f32,
-    w: f32,
-    h: f32,
+pub trait BoundrsDetection: Detection {
+    fn class(&self, config: &DynLabelConfig) -> DynLabel;
+    fn class_num(&self) -> usize;
+    fn to_screen_rect(self, img_rect: Rect) -> Rect;
+    fn is_close(&self, other: &Self, threshold: f32) -> bool;
+    fn iou(&self, other: &Self) -> f32;
+    fn x(&self) -> f32;
+    fn from_rect(rect: Rect, img_rect: Rect, class: &DynLabel) -> Self;
 }
 
-impl FromStr for YoloBB {
-    type Err = Error;
+// pub type YoloLabel<D: Detection> = Vec<D>;
 
-    fn from_str(s: &str) -> Result<Self> {
-        let parts: Vec<_> = s.split(' ').collect();
-        let class_num: usize = parts[0].parse()?;
-        let (x, y) = (parts[1].parse()?, parts[2].parse()?);
-        let (w, h) = (parts[3].parse()?, parts[4].parse()?);
-        Ok(Self {
-            class_num,
-            x,
-            y,
-            w,
-            h,
-        })
-    }
-}
+// #[derive(Debug, Clone, Copy, PartialEq)]
+// pub struct YoloBB {
+//     pub class_num: usize,
+//     pub x: f32,
+//     y: f32,
+//     w: f32,
+//     h: f32,
+// }
 
-impl YoloBB {
-    fn as_string(self) -> String {
-        format!(
-            "{} {} {} {} {}",
-            self.class_num, self.x, self.y, self.w, self.h
-        )
-    }
-    pub fn center(&self) -> [f32; 2] {
-        [self.x, self.y]
-    }
+// impl FromStr for YoloBB {
+//     type Err = Error;
 
-    pub fn iou(&self, other: &YoloBB) -> f32 {
+//     fn from_str(s: &str) -> Result<Self> {
+//         let parts: Vec<_> = s.split(' ').collect();
+//         let class_num: usize = parts[0].parse()?;
+//         let (x, y) = (parts[1].parse()?, parts[2].parse()?);
+//         let (w, h) = (parts[3].parse()?, parts[4].parse()?);
+//         Ok(Self {
+//             class_num,
+//             x,
+//             y,
+//             w,
+//             h,
+//         })
+//     }
+// }
+
+impl BoundrsDetection for YoloBBox {
+    fn iou(&self, other: &YoloBBox) -> f32 {
         let rect_0_1: Rect = [[0.0, 0.0].into(), [1.0, 1.0].into()].into();
         let self_box = self.to_screen_rect(rect_0_1);
         let other_box = other.to_screen_rect(rect_0_1);
         self_box.intersect(other_box).area() / self_box.union(other_box).area()
     }
-    pub fn is_close(&self, other: &YoloBB, threshold: f32) -> bool {
+    fn is_close(&self, other: &YoloBBox, threshold: f32) -> bool {
         let rect_0_1: Rect = [[0.0, 0.0].into(), [1.0, 1.0].into()].into();
         let self_box = self.to_screen_rect(rect_0_1);
         let other_box = other.to_screen_rect(rect_0_1);
         let iou = self_box.intersect(other_box).area() / self_box.union(other_box).area();
-        self.class_num == other.class_num && iou > threshold
+        self.class == other.class && iou > threshold
     }
-}
-
-impl YoloBB {
-    pub fn to_screen_rect(self, img_rect: Rect) -> Rect {
+    fn to_screen_rect(self, img_rect: Rect) -> Rect {
         let img_w = img_rect.size().x;
         let img_h = img_rect.size().y;
         let yl = self;
@@ -170,18 +167,20 @@ impl YoloBB {
         );
         rect.translate(img_rect.left_top().to_vec2())
     }
-    pub fn class(&self, config: &DynLabelConfig) -> DynLabel {
+    fn class(&self, config: &DynLabelConfig) -> DynLabel {
         // TODO improve error handling, or even better, encode in type system
-        config.label_from_usize(self.class_num).unwrap_or_else(|| {
-            println!("{:?}", self);
-            panic!(
-                "Config should work with this label, {} > {}",
-                self.class_num,
-                config.num_labels()
-            )
-        })
+        config
+            .label_from_usize(self.class.to_usize())
+            .unwrap_or_else(|| {
+                println!("{:?}", self);
+                panic!(
+                    "Config should work with this label, {:?} > {}",
+                    self.class,
+                    config.num_labels()
+                )
+            })
     }
-    pub fn from_rect(rect: Rect, img_rect: Rect, class: &DynLabel) -> Self {
+    fn from_rect(rect: Rect, img_rect: Rect, class: &DynLabel) -> Self {
         let rect = rect.intersect(img_rect);
         let rect = rect.translate(-img_rect.left_top().to_vec2());
         let img_size = img_rect.size();
@@ -194,20 +193,30 @@ impl YoloBB {
         let w = size.x / img_w;
         let h = size.y / img_h;
         let class_num = class.i;
-        YoloBB {
-            class_num,
+        YoloBBox {
+            class: Card::from_usize(class_num).unwrap(),
             x: x.clamp(0.0, 1.0),
             y: y.clamp(0.0, 1.0),
             w,
             h,
+            confidence: 1.0,
         }
+    }
+
+    fn class_num(&self) -> usize {
+        self.class.to_usize()
+    }
+
+    fn x(&self) -> f32 {
+        self.x
     }
 }
 
 #[derive(Debug, Clone)]
-pub struct Datapoint {
+pub struct LabelOnDisk<D: Detection> {
     img_src: PathBuf,
     label_src: PathBuf,
+    detections: PhantomData<D>,
 }
 
 fn load_image_from_path(path: &std::path::Path) -> Result<ColorImage> {
@@ -218,39 +227,34 @@ fn load_image_from_path(path: &std::path::Path) -> Result<ColorImage> {
     Ok(ColorImage::from_rgba_unmultiplied(size, pixels.as_slice()))
 }
 
-impl Datapoint {
+impl<D: BoundrsDetection> LabelOnDisk<D> {
     pub fn new(img_src: PathBuf, labels_dir: PathBuf) -> Self {
-        let img_filename = img_src
+        let img_src = img_src
             .file_name()
-            .expect(".jpg extension should be a file");
+            .expect(".jpg extension should be a file")
+            .into();
         let mut label_src = labels_dir;
-        label_src.push(img_filename);
+        label_src.push(&img_src);
         label_src.set_extension("txt");
-        Datapoint { img_src, label_src }
+        LabelOnDisk {
+            img_src,
+            label_src,
+            detections: PhantomData::<D>,
+        }
     }
-    fn load_image(&self) -> Result<ColorImage> {
+    pub fn load_image(&self) -> Result<ColorImage> {
         load_image_from_path(&self.img_src)
     }
-    pub fn load_label(&self) -> Result<YoloLabel> {
-        if !self.label_src.exists() {
+    pub fn load_label(&self) -> Result<Detections<D>> {
+        let label_src = &self.label_src;
+        if label_src.exists() {
             File::create(&self.label_src).expect("File creation should not fail");
         }
-        let yolo_strs = std::fs::read_to_string(&self.label_src)?;
 
-        let mut labels = vec![];
-        for line in yolo_strs.lines() {
-            let label = YoloBB::from_str(line)?;
-            labels.push(label)
-        }
-        Ok(labels)
+        Detections::from_file(&self.label_src)
     }
-    pub fn save_label(&self, label: YoloLabel) -> Result<()> {
-        let mut file = std::io::BufWriter::new(File::create(&self.label_src)?);
-        for yolo_label in label {
-            writeln!(file, "{}", yolo_label.as_string())?;
-        }
-        debug!("Saving labels to {:?}", self.label_src);
-        file.flush()?;
+    pub fn save_label(&self, label: Detections<D>) -> Result<()> {
+        label.write_to_file(&self.label_src)?;
         Ok(())
     }
     pub fn img_name(&self) -> &str {
@@ -263,16 +267,18 @@ impl Datapoint {
     pub fn label_name(&self) -> &str {
         self.label_src
             .file_name()
-            .expect(".jpg path should be a file")
+            .expect(".tx path should be a file")
             .to_str()
-            .expect(".jpg filename can be made to a string")
+            .expect(".txt filename can be made to a string")
     }
+
     pub(crate) fn remove_prefix(&self, old_prefix: &str) -> Self {
         let label_name = self.label_name();
         let label_name = label_name.replace(old_prefix, "");
         Self {
             label_src: self.label_src.with_file_name(label_name),
             img_src: self.img_src.clone(),
+            detections: PhantomData,
         }
     }
     pub(crate) fn add_prefix(&self, new_prefix: &str) -> Self {
@@ -281,6 +287,7 @@ impl Datapoint {
         Self {
             label_src: self.label_src.with_file_name(label_name),
             img_src: self.img_src.clone(),
+            detections: PhantomData,
         }
     }
 }
@@ -294,12 +301,12 @@ pub enum DatasetMovement {
     JumpTo(usize),
 }
 
-pub struct Dataset {
-    data: Vec<Datapoint>,
+pub struct Dataset<D: BoundrsDetection> {
+    data: Vec<LabelOnDisk<D>>,
     i: usize,
 }
 
-impl Dataset {
+impl<D: BoundrsDetection> Dataset<D> {
     pub fn from_input_dir(labels_dir: &Path) -> Result<Self> {
         let mut data = vec![];
         // let labels_dir = PathBuf::from("./input");
@@ -307,7 +314,7 @@ impl Dataset {
         let mut paths: Vec<_> = glob(&jpg_glob)?.filter_map(Result::ok).collect();
         alphanumeric_sort::sort_path_slice(&mut paths);
         for img_src in paths.into_iter() {
-            data.push(Datapoint::new(img_src, labels_dir.to_path_buf()))
+            data.push(LabelOnDisk::new(img_src, labels_dir.to_path_buf()))
         }
         if data.is_empty() {
             return Err(anyhow!(
@@ -343,10 +350,10 @@ impl Dataset {
     pub fn current_image(&self) -> Result<ColorImage> {
         self.current().load_image()
     }
-    pub fn current_label(&self) -> Result<YoloLabel> {
+    pub fn current_label(&self) -> Result<Detections<D>> {
         self.current().load_label()
     }
-    pub fn previous_labels(&self, num: usize) -> Result<Vec<YoloLabel>> {
+    pub fn previous_labels(&self, num: usize) -> Result<Vec<Detections<D>>> {
         (1..=num)
             .map(|back| {
                 let previous = self.i.saturating_sub(back);
@@ -354,7 +361,7 @@ impl Dataset {
             })
             .collect()
     }
-    pub fn previous_datapoints(&self, num: usize) -> Vec<&Datapoint> {
+    pub fn previous_datapoints(&self, num: usize) -> Vec<&LabelOnDisk<D>> {
         (0..=num)
             .map(|back| {
                 let previous = self.i.saturating_sub(back);
@@ -374,7 +381,7 @@ impl Dataset {
     pub fn get_progress(&self) -> (usize, usize, usize) {
         (0, self.i, self.data.len())
     }
-    fn save_label(&self, label: YoloLabel) -> Result<()> {
+    fn save_label(&self, label: Detections<D>) -> Result<()> {
         self.data[self.i].save_label(label)
     }
     fn next(&mut self) -> Result<()> {
@@ -390,7 +397,7 @@ impl Dataset {
             self.i += 1;
             if self.data[self.i].label_src.exists() {
                 let label = self.data[self.i].load_label()?;
-                if label.iter().any(|bb| classes.contains(&bb.class_num)) {
+                if label.0.iter().any(|bb| classes.contains(&bb.class_num())) {
                     break;
                 }
             }
@@ -402,7 +409,7 @@ impl Dataset {
             self.i -= 1;
             if self.data[self.i].label_src.exists() {
                 let label = self.data[self.i].load_label()?;
-                if label.iter().any(|bb| classes.contains(&bb.class_num)) {
+                if label.0.iter().any(|bb| classes.contains(&bb.class_num())) {
                     break;
                 }
             }
@@ -415,7 +422,11 @@ impl Dataset {
     }
 
     // TOD take Option for label instead of save flag
-    pub fn go(&mut self, movement: DatasetMovement, save_label: Option<YoloLabel>) -> Result<()> {
+    pub fn go(
+        &mut self,
+        movement: DatasetMovement,
+        save_label: Option<Detections<D>>,
+    ) -> Result<()> {
         if let Some(label) = save_label {
             self.save_label(label)?;
         }
@@ -428,11 +439,11 @@ impl Dataset {
         }
     }
 
-    pub fn current(&self) -> &Datapoint {
+    pub fn current(&self) -> &LabelOnDisk<D> {
         &self.data[self.i]
     }
 
-    pub fn iter_data(&self) -> impl Iterator<Item = &Datapoint> {
+    pub fn iter_data(&self) -> impl Iterator<Item = &LabelOnDisk<D>> {
         self.data.iter()
     }
 }

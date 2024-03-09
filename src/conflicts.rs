@@ -1,36 +1,17 @@
 use anyhow::Result;
+use bje_detections::Detections;
 use egui::*;
 use std::{
     collections::{HashMap, HashSet},
     fs,
     path::{Path, PathBuf},
-    str::FromStr,
 };
 
 use crate::{
-    dataset::{Datapoint, Dataset, DatasetMovement, DynLabel, DynLabelConfig, YoloBB, YoloLabel},
+    dataset::{BoundrsDetection, Dataset, DatasetMovement, DynLabel, DynLabelConfig, LabelOnDisk},
     Tool,
 };
 use image::{Rgba, RgbaImage};
-
-// use clap::Parser;
-
-// /// Simple program to greet a person
-// #[derive(Parser, Debug)]
-// #[command(author, version, about, long_about = None)]
-// struct Args {
-//     #[arg(short, long)]
-//     gt_dir: PathBuf,
-
-//     #[clap(short, long, value_parser, num_args = 1.., value_delimiter = ' ')]
-//     pred_dirs: Vec<PathBuf>,
-
-//     #[arg(long, default_value = "./labels_52.toml")]
-//     gt_config: PathBuf,
-
-//     #[clap(short, long, value_parser, num_args = 1.., value_delimiter = ' ')]
-//     configs_pred: Vec<PathBuf>,
-// }
 
 #[derive(Debug)]
 enum CurrentDataset {
@@ -64,7 +45,7 @@ impl CurrentDataset {
     }
 }
 
-pub struct Conflicts {
+pub struct Conflicts<D: BoundrsDetection> {
     gt_config: DynLabelConfig,
     // TODO store just the folder paths here and config in a separate dictionary
     pred_dirs: Vec<PathBuf>,
@@ -78,13 +59,13 @@ pub struct Conflicts {
     last_time: f64,
     shown_classes: HashSet<usize>,
     current_dataset: CurrentDataset,
-    gt_label: YoloLabel,
-    current_label: YoloLabel,
+    gt_label: Detections<D>,
+    current_label: Detections<D>,
     label_diffs: Vec<(String, i32)>,
 }
 
-impl Conflicts {
-    pub fn from_dir<P: AsRef<Path>>(dir: P, initial: &Datapoint) -> anyhow::Result<Self> {
+impl<D: BoundrsDetection> Conflicts<D> {
+    pub fn from_dir<P: AsRef<Path>>(dir: P, initial: &LabelOnDisk<D>) -> anyhow::Result<Self> {
         let mut gt_dataset_dir = PathBuf::from(dir.as_ref());
         gt_dataset_dir.push("normal");
         let gt_config = DynLabelConfig::load_from_file("labels_52.toml").unwrap();
@@ -118,7 +99,7 @@ impl Conflicts {
         gt_config: DynLabelConfig,
         pred_dirs: Vec<PathBuf>,
         pred_confs: HashMap<PathBuf, DynLabelConfig>,
-        initial: &Datapoint,
+        initial: &LabelOnDisk<D>,
     ) -> anyhow::Result<Self> {
         let current_bbs = initial.load_label().unwrap();
 
@@ -285,7 +266,7 @@ impl Conflicts {
             }
         }
     }
-    fn handle_left_right(&mut self, ui: &Ui, dataset: &mut Dataset) -> Result<()> {
+    fn handle_left_right(&mut self, ui: &Ui, dataset: &mut Dataset<D>) -> Result<()> {
         let next_pressed =
             ui.input(|i| i.key_pressed(egui::Key::ArrowRight) | i.key_pressed(egui::Key::D));
         let previous_pressed =
@@ -302,7 +283,8 @@ impl Conflicts {
         self.refresh_state(dataset.current())
     }
 
-    fn load_current_label(&mut self, dataset: &Dataset) -> Result<Option<YoloLabel>> {
+    // todo, reduce complexity in return type here
+    fn load_current_label(&mut self, dataset: &Dataset<D>) -> Result<Option<Detections<D>>> {
         let label = match self.current_dataset {
             CurrentDataset::GroundTruth => self.current_label.clone(),
             CurrentDataset::Predicted(i) => {
@@ -316,20 +298,21 @@ impl Conflicts {
                     return Ok(None);
                 }
                 assert!(label_file.exists());
-                let yolo_strs = std::fs::read_to_string(label_file)?;
+                Detections::from_file(&label_file)?
+                // let yolo_strs = std::fs::read_to_string(label_file)?;
 
-                let mut labels = vec![];
-                for line in yolo_strs.lines() {
-                    let label = YoloBB::from_str(line)?;
-                    labels.push(label)
-                }
-                labels
+                // let mut labels = vec![];
+                // for line in yolo_strs.lines() {
+                //     let label = YoloBB::from_str(line)?;
+                //     labels.push(label)
+                // }
+                // labels
             }
         };
         Ok(Some(label))
     }
 
-    fn move_predicitions(&mut self, movement: PredictionMovement, dataset: &Dataset) {
+    fn move_predicitions(&mut self, movement: PredictionMovement, dataset: &Dataset<D>) {
         let offset = match movement {
             PredictionMovement::Next => 1,
             PredictionMovement::Previous => -1,
@@ -349,7 +332,7 @@ impl Conflicts {
         }
         self.label_diffs = self.label_differences();
     }
-    fn handle_prediction_switch(&mut self, ui: &Ui, dataset: &Dataset) {
+    fn handle_prediction_switch(&mut self, ui: &Ui, dataset: &Dataset<D>) {
         // We save the current label and update the state in the new mode
         if ui.input_mut(|i| i.consume_key(Modifiers::NONE, Key::ArrowUp)) {
             self.move_predicitions(PredictionMovement::Next, dataset);
@@ -366,14 +349,18 @@ enum PredictionMovement {
 }
 
 #[inline]
-fn pos_inside_label_box(label: &YoloLabel, pos: Pos2, img_rect: Rect) -> bool {
+fn pos_inside_label_box<D: BoundrsDetection>(
+    label: &Detections<D>,
+    pos: Pos2,
+    img_rect: Rect,
+) -> bool {
     label
         .iter()
         .any(|l| l.to_screen_rect(img_rect).contains(pos))
 }
 // TODO move this to utils in the lib and reuse it with labeling. Or encapsulate all funtionality as a tool or smth
-fn generate_mask(
-    label: &YoloLabel,
+fn generate_mask<D: BoundrsDetection>(
+    label: &Detections<D>,
     shown_classes: &HashSet<usize>,
     img_rect: Rect,
     opacity: u8,
@@ -381,7 +368,7 @@ fn generate_mask(
     let highlighted_label = label
         .iter()
         .cloned()
-        .filter(|bb| shown_classes.contains(&bb.class_num))
+        .filter(|bb| shown_classes.contains(&bb.class_num()))
         .collect();
     let width = img_rect.width() as usize;
     let height = img_rect.height() as usize;
@@ -398,7 +385,7 @@ fn generate_mask(
     ColorImage::from_rgba_unmultiplied([width, height], pixels.as_slice())
 }
 
-impl Tool for Conflicts {
+impl<D: BoundrsDetection> Tool<D> for Conflicts<D> {
     fn draw_ui(&mut self, ui: &mut Ui) -> anyhow::Result<()> {
         self.draw_ui(ui);
         Ok(())
@@ -408,7 +395,7 @@ impl Tool for Conflicts {
         &mut self,
         central_panel: &mut Ui,
         img_response: Response,
-        dataset: &mut Dataset,
+        dataset: &mut Dataset<D>,
     ) -> anyhow::Result<()> {
         self.handle_prediction_switch(central_panel, dataset);
         // let img_response = self.draw_img(ui);
@@ -443,7 +430,7 @@ impl Tool for Conflicts {
         Ok(())
     }
 
-    fn refresh_state(&mut self, datapoint: &crate::dataset::Datapoint) -> anyhow::Result<()> {
+    fn refresh_state(&mut self, datapoint: &LabelOnDisk<D>) -> anyhow::Result<()> {
         self.gt_label = datapoint.load_label()?;
         self.current_label = datapoint.load_label()?;
         self.current_dataset = CurrentDataset::GroundTruth;
@@ -451,7 +438,7 @@ impl Tool for Conflicts {
         Ok(())
     }
 
-    fn save_state(&self, _datapoint: &crate::dataset::Datapoint) -> anyhow::Result<()> {
+    fn save_state(&self, _datapoint: &LabelOnDisk<D>) -> anyhow::Result<()> {
         Ok(())
     }
 

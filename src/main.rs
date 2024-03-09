@@ -1,3 +1,4 @@
+use bje_detections::YoloBBox;
 use boundrs::file_loader::{BlockingFileLoader, ImageCrateLoader};
 use boundrs::shady::ShadyFinder;
 use boundrs::Tool;
@@ -5,7 +6,7 @@ use eframe::{egui, CreationContext};
 use egui::*;
 use std::path::PathBuf;
 
-use boundrs::dataset::{Dataset, DatasetMovement, DynLabelConfig};
+use boundrs::dataset::{BoundrsDetection, Dataset, DatasetMovement, DynLabelConfig};
 
 use boundrs::check::check_differences;
 use boundrs::conflicts::Conflicts;
@@ -97,7 +98,7 @@ fn main() {
             eframe::run_native(
                 "eframe template",
                 options,
-                Box::new(|cc| Box::new(BoundrsV2::new(cc, args))),
+                Box::new(|cc| Box::new(BoundrsV2::<YoloBBox>::new(cc, args))),
             )
             .unwrap();
         }
@@ -108,21 +109,21 @@ fn main() {
     }
 }
 
-struct Tools {
-    all_modes: Vec<Box<dyn Tool>>,
+struct Tools<D: BoundrsDetection> {
+    all_modes: Vec<Box<dyn Tool<D>>>,
     current_mode: usize,
     tagging: Tagging,
     tagging_active: bool,
 }
 
-impl Tools {
-    fn active_mut(&mut self) -> &mut dyn Tool {
+impl<D: BoundrsDetection + 'static> Tools<D> {
+    fn active_mut(&mut self) -> &mut dyn Tool<D> {
         if self.tagging_active {
             return &mut self.tagging;
         }
         return self.all_modes[self.current_mode].as_mut();
     }
-    fn active(&self) -> &dyn Tool {
+    fn active(&self) -> &dyn Tool<D> {
         if self.tagging_active {
             return &self.tagging;
         }
@@ -135,8 +136,8 @@ impl Tools {
         self.tagging_active = !self.tagging_active
     }
 
-    fn init(args: LabelArgs, dataset: &Dataset) -> Tools {
-        let mut all_tools: Vec<Box<dyn Tool>> = vec![];
+    fn init(args: LabelArgs, dataset: &Dataset<D>) -> Tools<D> {
+        let mut all_tools: Vec<Box<dyn Tool<D>>> = vec![];
         let label_config = DynLabelConfig::load_from_file(&args.config).unwrap();
         let label = Labeling::new(label_config.clone(), dataset.current());
         all_tools.push(Box::new(label));
@@ -168,16 +169,16 @@ impl Tools {
     }
 }
 
-struct BoundrsV2 {
+struct BoundrsV2<D: BoundrsDetection> {
     // current_tool: Box<dyn Tool>,
     // tagging: TaggingTool,
-    tools: Tools,
-    dataset: Dataset,
+    tools: Tools<D>,
+    dataset: Dataset<D>,
     img_needs_focus: bool,
     // conflicts: Conflicts,
 }
 
-impl BoundrsV2 {
+impl<D: BoundrsDetection + 'static> BoundrsV2<D> {
     fn new(cc: &CreationContext, args: LabelArgs) -> Self {
         let ctx = &cc.egui_ctx;
         ctx.set_visuals(egui::Visuals {
@@ -218,9 +219,7 @@ impl BoundrsV2 {
             img_needs_focus: true,
         }
     }
-}
 
-impl BoundrsV2 {
     fn draw_top_ui(&mut self, ui: &mut Ui) {
         ui.label(format!("Active Tool: {:?}", self.tools.active().name()));
         let filename = self.dataset.current_name();
@@ -254,7 +253,7 @@ impl BoundrsV2 {
     }
 }
 
-impl eframe::App for BoundrsV2 {
+impl<D: BoundrsDetection + 'static> eframe::App for BoundrsV2<D> {
     fn update(&mut self, ctx: &Context, _frame: &mut eframe::Frame) {
         // Handle global shortcuts
         if ctx.input_mut(|i| i.consume_key(Modifiers::CTRL, Key::Space)) {
