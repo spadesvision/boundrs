@@ -8,7 +8,9 @@ use std::{
 };
 
 use crate::{
-    dataset::{BoundrsDetection, Dataset, DatasetMovement, DynLabel, DynLabelConfig, LabelOnDisk},
+    dataset::{
+        BoundrsDataset, BoundrsDetection, DatasetMovement, DynLabel, DynLabelConfig, LabelOnDisk,
+    },
     Tool,
 };
 use image::{Rgba, RgbaImage};
@@ -266,7 +268,7 @@ impl<D: BoundrsDetection> Conflicts<D> {
             }
         }
     }
-    fn handle_left_right(&mut self, ui: &Ui, dataset: &mut Dataset<D>) -> Result<()> {
+    fn handle_left_right(&mut self, ui: &Ui, dataset: &mut BoundrsDataset<D>) -> Result<()> {
         let next_pressed =
             ui.input(|i| i.key_pressed(egui::Key::ArrowRight) | i.key_pressed(egui::Key::D));
         let previous_pressed =
@@ -284,7 +286,7 @@ impl<D: BoundrsDetection> Conflicts<D> {
     }
 
     // todo, reduce complexity in return type here
-    fn load_current_label(&mut self, dataset: &Dataset<D>) -> Result<Option<Detections<D>>> {
+    fn load_current_label(&mut self, dataset: &BoundrsDataset<D>) -> Result<Option<Detections<D>>> {
         let label = match self.current_dataset {
             CurrentDataset::GroundTruth => self.current_label.clone(),
             CurrentDataset::Predicted(i) => {
@@ -312,7 +314,7 @@ impl<D: BoundrsDetection> Conflicts<D> {
         Ok(Some(label))
     }
 
-    fn move_predicitions(&mut self, movement: PredictionMovement, dataset: &Dataset<D>) {
+    fn move_predicitions(&mut self, movement: PredictionMovement, dataset: &BoundrsDataset<D>) {
         let offset = match movement {
             PredictionMovement::Next => 1,
             PredictionMovement::Previous => -1,
@@ -332,7 +334,7 @@ impl<D: BoundrsDetection> Conflicts<D> {
         }
         self.label_diffs = self.label_differences();
     }
-    fn handle_prediction_switch(&mut self, ui: &Ui, dataset: &Dataset<D>) {
+    fn handle_prediction_switch(&mut self, ui: &Ui, dataset: &BoundrsDataset<D>) {
         // We save the current label and update the state in the new mode
         if ui.input_mut(|i| i.consume_key(Modifiers::NONE, Key::ArrowUp)) {
             self.move_predicitions(PredictionMovement::Next, dataset);
@@ -395,7 +397,7 @@ impl<D: BoundrsDetection> Tool<D> for Conflicts<D> {
         &mut self,
         central_panel: &mut Ui,
         img_response: Response,
-        dataset: &mut Dataset<D>,
+        dataset: &mut BoundrsDataset<D>,
     ) -> anyhow::Result<()> {
         self.handle_prediction_switch(central_panel, dataset);
         // let img_response = self.draw_img(ui);

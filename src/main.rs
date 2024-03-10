@@ -1,4 +1,4 @@
-use bje_detections::YoloBBox;
+use bje_detections::{BBoxCardPose, YoloBBox};
 use boundrs::file_loader::{BlockingFileLoader, ImageCrateLoader};
 use boundrs::shady::ShadyFinder;
 use boundrs::Tool;
@@ -6,7 +6,7 @@ use eframe::{egui, CreationContext};
 use egui::*;
 use std::path::PathBuf;
 
-use boundrs::dataset::{BoundrsDetection, Dataset, DatasetMovement, DynLabelConfig};
+use boundrs::dataset::{BoundrsDataset, BoundrsDetection, DatasetMovement, DynLabelConfig};
 
 use boundrs::check::check_differences;
 use boundrs::conflicts::Conflicts;
@@ -14,7 +14,7 @@ use boundrs::labeling::Labeling;
 use boundrs::relabeling::Relabeling;
 use boundrs::tagging::Tagging;
 
-use clap::Parser;
+use clap::{Parser, ValueEnum};
 
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
@@ -52,8 +52,17 @@ struct DiffsArgs {
     data_dir: PathBuf,
 }
 
+#[derive(ValueEnum, Debug, Clone)]
+enum DataFormat {
+    YoloBBox,
+    BBoxCardPose,
+}
+
 #[derive(Parser, Debug)]
 struct LabelArgs {
+    #[arg(short, long, value_enum, default_value_t = DataFormat::YoloBBox)]
+    data_format: DataFormat,
+
     #[arg(short, long)]
     data_dir: PathBuf,
 
@@ -76,6 +85,8 @@ struct LabelArgs {
     start: Option<usize>,
 }
 
+type AppBuilder = Box<dyn FnOnce(&CreationContext<'_>) -> Box<dyn eframe::App>>;
+
 fn main() {
     env_logger::init();
     let args = Args::parse();
@@ -95,12 +106,17 @@ fn main() {
             let options = eframe::NativeOptions {
                 ..Default::default()
             };
-            eframe::run_native(
-                "eframe template",
-                options,
-                Box::new(|cc| Box::new(BoundrsV2::<YoloBBox>::new(cc, args))),
-            )
-            .unwrap();
+
+            let app_builder: AppBuilder = match args.data_format {
+                DataFormat::YoloBBox => Box::new(|cc: &CreationContext<'_>| {
+                    Box::new(BoundrsV2::<YoloBBox>::new(cc, args)) as Box<dyn eframe::App + 'static>
+                }),
+                DataFormat::BBoxCardPose => Box::new(|cc: &CreationContext<'_>| {
+                    Box::new(BoundrsV2::<BBoxCardPose>::new(cc, args))
+                        as Box<dyn eframe::App + 'static>
+                }),
+            };
+            eframe::run_native("eframe template", options, app_builder).unwrap();
         }
         Command::FindShady(args) => {
             let shady = ShadyFinder::new(&args.data_dir).unwrap();
@@ -136,7 +152,7 @@ impl<D: BoundrsDetection + 'static> Tools<D> {
         self.tagging_active = !self.tagging_active
     }
 
-    fn init(args: LabelArgs, dataset: &Dataset<D>) -> Tools<D> {
+    fn init(args: LabelArgs, dataset: &BoundrsDataset<D>) -> Tools<D> {
         let mut all_tools: Vec<Box<dyn Tool<D>>> = vec![];
         let label_config = DynLabelConfig::load_from_file(&args.config).unwrap();
         let label = Labeling::new(label_config.clone(), dataset.current());
@@ -173,7 +189,7 @@ struct BoundrsV2<D: BoundrsDetection> {
     // current_tool: Box<dyn Tool>,
     // tagging: TaggingTool,
     tools: Tools<D>,
-    dataset: Dataset<D>,
+    dataset: BoundrsDataset<D>,
     img_needs_focus: bool,
     // conflicts: Conflicts,
 }
@@ -185,7 +201,7 @@ impl<D: BoundrsDetection + 'static> BoundrsV2<D> {
             image_loading_spinners: false,
             ..Default::default()
         });
-        let mut dataset = Dataset::with_prefix(&args.data_dir, &args.prefix).unwrap();
+        let mut dataset = BoundrsDataset::with_prefix(&args.data_dir, &args.prefix).unwrap();
         if let Some(start) = args.start {
             dataset.go(DatasetMovement::JumpTo(start), None).unwrap();
         }

@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use crate::dataset::{BoundrsDetection, Dataset, DynLabelConfig};
+use crate::dataset::{BoundrsDataset, BoundrsDetection, DynLabelConfig};
 use bje_detections::{Detections, YoloBBox};
 use itertools::iproduct;
 
@@ -72,8 +72,8 @@ pub fn check_differences(
     config: PathBuf,
     config_relabel: PathBuf,
 ) -> anyhow::Result<()> {
-    let dataset = Dataset::with_prefix(&path, prefix)?;
-    let relabel_dataset = Dataset::with_prefix(&path, prefix_relabel)?;
+    let dataset = BoundrsDataset::with_prefix(&path, prefix)?;
+    let relabel_dataset = BoundrsDataset::with_prefix(&path, prefix_relabel)?;
     let config = DynLabelConfig::load_from_file(config)?;
     let config_relabel = DynLabelConfig::load_from_file(config_relabel)?;
 

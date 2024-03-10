@@ -4,7 +4,9 @@ use egui::{Key, *};
 use std::collections::HashSet;
 
 use crate::{
-    dataset::{BoundrsDetection, Dataset, DatasetMovement, DynLabel, DynLabelConfig, LabelOnDisk},
+    dataset::{
+        BoundrsDataset, BoundrsDetection, DatasetMovement, DynLabel, DynLabelConfig, LabelOnDisk,
+    },
     Tool,
 };
 use image::{Rgba, RgbaImage};
@@ -75,7 +77,7 @@ impl<D: BoundrsDetection> Labeling<D> {
         &mut self,
         rect: Rect,
         img_rect: Rect,
-        dataset: &Dataset<D>,
+        dataset: &BoundrsDataset<D>,
     ) -> Result<()> {
         // get two coordinates to repeat only the labels completely in this box
         let prev_label = dataset.previous_labels(1)?[0].clone();
@@ -96,7 +98,7 @@ impl<D: BoundrsDetection> Labeling<D> {
         rect: Rect,
         img_rect: Rect,
         past: usize,
-        dataset: &Dataset<D>,
+        dataset: &BoundrsDataset<D>,
     ) -> Result<()> {
         // get two coordinates to repeat only the labels completely in this box
         for datapoint in dataset.previous_datapoints(past) {
@@ -111,6 +113,11 @@ impl<D: BoundrsDetection> Labeling<D> {
     fn remove_bbs(&mut self, pos: Pos2, img_rect: Rect) {
         self.remove_labels(pos, img_rect);
     }
+    fn draw_pose(&self, pose: &[Pos2], color: Color32, painter: &Painter) {
+        for center in pose {
+            painter.circle_filled(*center, 5.0, color)
+        }
+    }
     fn draw_bbs(&self, ui: &mut Ui, img_rect: Rect) {
         // let img_rect = self.img_rect;
         let painter = ui.painter();
@@ -121,6 +128,10 @@ impl<D: BoundrsDetection> Labeling<D> {
             painter.rect_stroke(screen_rect, Rounding::ZERO, Stroke::new(2.0, color));
             let text_pos = screen_rect.left_bottom();
             self.draw_label_text(painter, text_pos, &bb.class(&self.label_config));
+
+            if let Some(pose) = bb.pose(img_rect) {
+                self.draw_pose(&pose, color, painter)
+            }
         }
     }
     fn draw_guide(&self, ui: &mut Ui, pos: Pos2) {
@@ -159,7 +170,12 @@ impl<D: BoundrsDetection> Labeling<D> {
             Color32::BLACK,
         );
     }
-    fn handle_img_response(&mut self, img_response: &Response, ui: &mut Ui, dataset: &Dataset<D>) {
+    fn handle_img_response(
+        &mut self,
+        img_response: &Response,
+        ui: &mut Ui,
+        dataset: &BoundrsDataset<D>,
+    ) {
         if img_response.secondary_clicked() {
             let screen_pos = img_response.interact_pointer_pos().unwrap();
             self.remove_bbs(screen_pos, img_response.rect);
@@ -243,7 +259,7 @@ impl<D: BoundrsDetection> Labeling<D> {
             }
         }
     }
-    fn handle_left_right(&mut self, ui: &Ui, dataset: &mut Dataset<D>) {
+    fn handle_left_right(&mut self, ui: &Ui, dataset: &mut BoundrsDataset<D>) {
         let next_pressed = ui.input(|i| i.key_pressed(egui::Key::ArrowRight));
         let previous_pressed = ui.input(|i| i.key_pressed(egui::Key::ArrowLeft));
 
@@ -331,10 +347,6 @@ impl<D: BoundrsDetection> Tool<D> for Labeling<D> {
             classes.sort();
             ui.label(format!("{classes:?}"));
         });
-        // ui.horizontal(|ui| {
-        //     ui.label("Zoom image:");
-        //     ui.add(DragValue::new(&mut self.zoom).speed(0.01));
-        // });
         ui.vertical(|ui| {
             ui.separator();
             ui.label(RichText::new("How to use").heading());
@@ -354,7 +366,7 @@ impl<D: BoundrsDetection> Tool<D> for Labeling<D> {
         &mut self,
         central_panel: &mut Ui,
         img_response: Response,
-        dataset: &mut Dataset<D>,
+        dataset: &mut BoundrsDataset<D>,
     ) -> Result<()> {
         if self.mask_needs_update && self.filter.is_some() {
             self.set_mask(central_panel.ctx(), img_response.rect)

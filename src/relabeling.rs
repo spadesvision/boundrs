@@ -4,7 +4,9 @@ use egui::*;
 use log::{error, info};
 
 use crate::{
-    dataset::{BoundrsDetection, Dataset, DatasetMovement, DynLabel, DynLabelConfig, LabelOnDisk},
+    dataset::{
+        BoundrsDataset, BoundrsDetection, DatasetMovement, DynLabel, DynLabelConfig, LabelOnDisk,
+    },
     Tool,
 };
 // use image::{Rgba, RgbaImage};
@@ -118,7 +120,7 @@ impl<D: BoundrsDetection> Relabeling<D> {
             );
         }
     }
-    fn handle_left_right(&mut self, ui: &Ui, dataset: &mut Dataset<D>, img_rect: Rect) {
+    fn handle_left_right(&mut self, ui: &Ui, dataset: &mut BoundrsDataset<D>, img_rect: Rect) {
         let next_pressed = ui.input(|i| i.key_pressed(egui::Key::ArrowRight));
         let previous_pressed = ui.input(|i| i.key_pressed(egui::Key::ArrowLeft));
 
@@ -170,7 +172,7 @@ impl<D: BoundrsDetection> Relabeling<D> {
         })
     }
 
-    pub fn handle_class_keys(&mut self, ui: &Ui, img_rect: Rect, dataset: &mut Dataset<D>) {
+    pub fn handle_class_keys(&mut self, ui: &Ui, img_rect: Rect, dataset: &mut BoundrsDataset<D>) {
         if let (Some(suit_usize), Some(highlighted)) =
             (self.new_class_pressed(ui), self.highlighted)
         {
@@ -221,7 +223,7 @@ impl<D: BoundrsDetection> Relabeling<D> {
             }
         }
     }
-    pub fn repeat_bbs(&mut self, dataset: &Dataset<D>, img_rect: Rect) -> Result<()> {
+    pub fn repeat_bbs(&mut self, dataset: &BoundrsDataset<D>, img_rect: Rect) -> Result<()> {
         let previous = dataset.previous_datapoints(2);
         self.take_similar_bbs(&previous, img_rect);
         self.highlighted = self.find_next_highlighted();
@@ -252,7 +254,7 @@ impl<D: BoundrsDetection> Tool<D> for Relabeling<D> {
         &mut self,
         central_panel: &mut Ui,
         img_response: Response,
-        dataset: &mut Dataset<D>,
+        dataset: &mut BoundrsDataset<D>,
     ) -> Result<()> {
         // Draw bbs
         self.draw_bbs(central_panel, img_response.rect);

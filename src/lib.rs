@@ -9,7 +9,7 @@ pub mod check;
 pub mod shady;
 
 // pub use conflicts::Conflicts;
-use dataset::{BoundrsDetection, Dataset, LabelOnDisk};
+use dataset::{BoundrsDataset, BoundrsDetection, LabelOnDisk};
 use egui::{Response, Ui};
 pub use labeling::Labeling;
 pub use relabeling::Relabeling;
@@ -28,7 +28,7 @@ pub trait Tool<D: BoundrsDetection> {
         &mut self,
         central_panel: &mut Ui,
         img_response: Response,
-        datset: &mut Dataset<D>,
+        datset: &mut BoundrsDataset<D>,
     ) -> anyhow::Result<()>;
     fn refresh_state(&mut self, datapoint: &LabelOnDisk<D>) -> anyhow::Result<()>;
     fn save_state(&self, datapoint: &LabelOnDisk<D>) -> anyhow::Result<()>;

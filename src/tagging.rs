@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 use anyhow::Result;
 
 use crate::{
-    dataset::{BoundrsDetection, Dataset, DatasetMovement, LabelOnDisk},
+    dataset::{BoundrsDataset, BoundrsDetection, DatasetMovement, LabelOnDisk},
     Tool,
 };
 
@@ -138,7 +138,7 @@ impl Tagging {
         //     });
         // Ok(())
     }
-    fn handle_left_right<D: BoundrsDetection>(&mut self, ui: &Ui, dataset: &mut Dataset<D>) {
+    fn handle_left_right<D: BoundrsDetection>(&mut self, ui: &Ui, dataset: &mut BoundrsDataset<D>) {
         let next_pressed = ui.input(|i| i.key_pressed(egui::Key::ArrowRight));
         let previous_pressed = ui.input(|i| i.key_pressed(egui::Key::ArrowLeft));
 
@@ -170,7 +170,7 @@ impl<D: BoundrsDetection> Tool<D> for Tagging {
         &mut self,
         central_panel: &mut Ui,
         img_response: egui::Response,
-        dataset: &mut crate::dataset::Dataset<D>,
+        dataset: &mut crate::dataset::BoundrsDataset<D>,
     ) -> anyhow::Result<()> {
         if img_response.has_focus() {
             self.handle_left_right(central_panel, dataset)

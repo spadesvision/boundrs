@@ -1,17 +1,14 @@
-use anyhow::{anyhow, Result};
+use anyhow::Result;
+use bje_datasets::{Datapoint, Dataset};
 use egui::*;
-use glob::glob;
+use log::{info, warn};
 use serde::Deserialize;
-// use serde::Deserialize;
-// use serde::Serialize;
-// use serde_json;
 use std::collections::HashSet;
 use std::fs::File;
 use std::marker::PhantomData;
 use std::path::{Path, PathBuf};
-// use std::str::FromStr;
 
-use bje_detections::{Card, Detection, Detections, YoloBBox};
+use bje_detections::{BBoxCardPose, Card, Degree, Detection, Detections, YoloBBox, YoloOBB};
 
 #[derive(Deserialize, Clone)]
 pub struct DynLabelSpec {
@@ -112,36 +109,8 @@ pub trait BoundrsDetection: Detection {
     fn iou(&self, other: &Self) -> f32;
     fn x(&self) -> f32;
     fn from_rect(rect: Rect, img_rect: Rect, class: &DynLabel) -> Self;
+    fn pose(&self, img_rect: Rect) -> Option<Vec<Pos2>>;
 }
-
-// pub type YoloLabel<D: Detection> = Vec<D>;
-
-// #[derive(Debug, Clone, Copy, PartialEq)]
-// pub struct YoloBB {
-//     pub class_num: usize,
-//     pub x: f32,
-//     y: f32,
-//     w: f32,
-//     h: f32,
-// }
-
-// impl FromStr for YoloBB {
-//     type Err = Error;
-
-//     fn from_str(s: &str) -> Result<Self> {
-//         let parts: Vec<_> = s.split(' ').collect();
-//         let class_num: usize = parts[0].parse()?;
-//         let (x, y) = (parts[1].parse()?, parts[2].parse()?);
-//         let (w, h) = (parts[3].parse()?, parts[4].parse()?);
-//         Ok(Self {
-//             class_num,
-//             x,
-//             y,
-//             w,
-//             h,
-//         })
-//     }
-// }
 
 impl BoundrsDetection for YoloBBox {
     fn iou(&self, other: &YoloBBox) -> f32 {
@@ -210,6 +179,60 @@ impl BoundrsDetection for YoloBBox {
     fn x(&self) -> f32 {
         self.x
     }
+
+    fn pose(&self, _img_rect: Rect) -> Option<Vec<Pos2>> {
+        None
+    }
+}
+
+impl BoundrsDetection for BBoxCardPose {
+    fn iou(&self, other: &BBoxCardPose) -> f32 {
+        let (bbox, other) = (self.to_bbox(), other.to_bbox());
+        bbox.iou(&other)
+    }
+    fn is_close(&self, other: &BBoxCardPose, threshold: f32) -> bool {
+        let (bbox, other) = (self.to_bbox(), other.to_bbox());
+        bbox.is_close(&other, threshold)
+    }
+    fn to_screen_rect(self, img_rect: Rect) -> Rect {
+        let bbox = self.to_bbox();
+        bbox.to_screen_rect(img_rect)
+    }
+    fn class(&self, config: &DynLabelConfig) -> DynLabel {
+        let bbox = self.to_bbox();
+        bbox.class(config)
+    }
+    fn from_rect(rect: Rect, img_rect: Rect, class: &DynLabel) -> Self {
+        let bbox = YoloBBox::from_rect(rect, img_rect, class);
+        let obb = YoloOBB {
+            class: bbox.class,
+            x: bbox.x,
+            y: bbox.y,
+            w: bbox.w,
+            h: bbox.h,
+            degree: Degree(0.0),
+            confidence: bbox.confidence,
+        };
+        obb.into()
+    }
+
+    fn class_num(&self) -> usize {
+        let bbox = self.to_bbox();
+        bbox.class_num()
+    }
+
+    fn x(&self) -> f32 {
+        let bbox = self.to_bbox();
+        bbox.x()
+    }
+    fn pose(&self, img_rect: Rect) -> Option<Vec<Pos2>> {
+        let pose = self
+            .pose
+            .into_iter()
+            .map(|corner| pos2(corner.x * img_rect.width(), corner.y * img_rect.height()))
+            .collect();
+        Some(pose)
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -229,12 +252,12 @@ fn load_image_from_path(path: &std::path::Path) -> Result<ColorImage> {
 
 impl<D: BoundrsDetection> LabelOnDisk<D> {
     pub fn new(img_src: PathBuf, labels_dir: PathBuf) -> Self {
-        let img_src = img_src
+        let name = img_src
             .file_name()
-            .expect(".jpg extension should be a file")
-            .into();
+            .expect(".jpg extension should be a file");
+        // info!("creating filelabel at {img_src:?}");
         let mut label_src = labels_dir;
-        label_src.push(&img_src);
+        label_src.push(name);
         label_src.set_extension("txt");
         LabelOnDisk {
             img_src,
@@ -243,17 +266,21 @@ impl<D: BoundrsDetection> LabelOnDisk<D> {
         }
     }
     pub fn load_image(&self) -> Result<ColorImage> {
+        info!("Loading image {:?}", self.img_src);
         load_image_from_path(&self.img_src)
     }
     pub fn load_label(&self) -> Result<Detections<D>> {
         let label_src = &self.label_src;
-        if label_src.exists() {
+        info!("Loading label file {:?}", self.label_src);
+        if !label_src.exists() {
+            warn!("File doesnt exist");
             File::create(&self.label_src).expect("File creation should not fail");
         }
 
         Detections::from_file(&self.label_src)
     }
     pub fn save_label(&self, label: Detections<D>) -> Result<()> {
+        info!("Saving label {:?} to file {:?}", label, self.label_src);
         label.write_to_file(&self.label_src)?;
         Ok(())
     }
@@ -292,6 +319,25 @@ impl<D: BoundrsDetection> LabelOnDisk<D> {
     }
 }
 
+impl<D: BoundrsDetection> Datapoint for LabelOnDisk<D> {
+    fn from_pair(img_filename: &Path, detections_filename: &Path) -> Result<Self> {
+        Ok(LabelOnDisk {
+            img_src: img_filename.into(),
+            label_src: detections_filename.into(),
+            detections: PhantomData::<D>,
+        })
+    }
+
+    fn from_img_only(img_filename: &Path) -> Self {
+        let labels_dir = img_filename.parent().unwrap();
+        LabelOnDisk::new(img_filename.into(), labels_dir.into())
+    }
+
+    fn img_path(&self) -> &Path {
+        &self.img_src
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum DatasetMovement {
     Next,
@@ -301,40 +347,28 @@ pub enum DatasetMovement {
     JumpTo(usize),
 }
 
-pub struct Dataset<D: BoundrsDetection> {
-    data: Vec<LabelOnDisk<D>>,
+pub struct BoundrsDataset<D: BoundrsDetection> {
+    inner: Dataset<LabelOnDisk<D>>,
     i: usize,
 }
 
-impl<D: BoundrsDetection> Dataset<D> {
+impl<D: BoundrsDetection> BoundrsDataset<D> {
     pub fn from_input_dir(labels_dir: &Path) -> Result<Self> {
-        let mut data = vec![];
-        // let labels_dir = PathBuf::from("./input");
-        let jpg_glob = format!("{}/*.jpg", labels_dir.to_str().unwrap());
-        let mut paths: Vec<_> = glob(&jpg_glob)?.filter_map(Result::ok).collect();
-        alphanumeric_sort::sort_path_slice(&mut paths);
-        for img_src in paths.into_iter() {
-            data.push(LabelOnDisk::new(img_src, labels_dir.to_path_buf()))
-        }
-        if data.is_empty() {
-            return Err(anyhow!(
-                "Dataset is empty. You need to put .jpg files in ./input/"
-            ));
-        }
-        // start at first imgage without labels
-        let first_no_label = data
+        let inner: Dataset<LabelOnDisk<D>> = Dataset::from_directory(labels_dir)?;
+        let first_no_label = inner
+            .data
             .iter()
             .position(|p| !p.label_src.is_file())
             .unwrap_or(0);
 
-        Ok(Dataset {
-            data,
+        Ok(BoundrsDataset {
+            inner,
             i: first_no_label,
         })
     }
     pub fn with_prefix(labels_dir: &Path, prefix: &str) -> Result<Self> {
-        let mut dataset = Dataset::from_input_dir(labels_dir)?;
-        for datapoint in &mut dataset.data {
+        let mut dataset = BoundrsDataset::from_input_dir(labels_dir)?;
+        for datapoint in &mut dataset.inner.data {
             let label_name = datapoint
                 .label_src
                 .file_name()
@@ -357,7 +391,7 @@ impl<D: BoundrsDetection> Dataset<D> {
         (1..=num)
             .map(|back| {
                 let previous = self.i.saturating_sub(back);
-                self.data[previous].load_label()
+                self.inner.data[previous].load_label()
             })
             .collect()
     }
@@ -365,7 +399,7 @@ impl<D: BoundrsDetection> Dataset<D> {
         (0..=num)
             .map(|back| {
                 let previous = self.i.saturating_sub(back);
-                &self.data[previous]
+                &self.inner.data[previous]
             })
             .collect()
     }
@@ -379,13 +413,13 @@ impl<D: BoundrsDetection> Dataset<D> {
         format!("file://{}", self.current_img_path().display())
     }
     pub fn get_progress(&self) -> (usize, usize, usize) {
-        (0, self.i, self.data.len())
+        (0, self.i, self.inner.data.len())
     }
     fn save_label(&self, label: Detections<D>) -> Result<()> {
-        self.data[self.i].save_label(label)
+        self.inner.data[self.i].save_label(label)
     }
     fn next(&mut self) -> Result<()> {
-        self.i = std::cmp::min(self.i + 1, self.data.len() - 1);
+        self.i = std::cmp::min(self.i + 1, self.inner.data.len() - 1);
         Ok(())
     }
     fn previous(&mut self) -> Result<()> {
@@ -393,10 +427,10 @@ impl<D: BoundrsDetection> Dataset<D> {
         Ok(())
     }
     fn next_containing(&mut self, classes: &HashSet<usize>) -> Result<()> {
-        while self.i < self.data.len() - 1 {
+        while self.i < self.inner.data.len() - 1 {
             self.i += 1;
-            if self.data[self.i].label_src.exists() {
-                let label = self.data[self.i].load_label()?;
+            if self.inner.data[self.i].label_src.exists() {
+                let label = self.inner.data[self.i].load_label()?;
                 if label.0.iter().any(|bb| classes.contains(&bb.class_num())) {
                     break;
                 }
@@ -407,8 +441,8 @@ impl<D: BoundrsDetection> Dataset<D> {
     fn previous_containing(&mut self, classes: &HashSet<usize>) -> Result<()> {
         while self.i > 0 {
             self.i -= 1;
-            if self.data[self.i].label_src.exists() {
-                let label = self.data[self.i].load_label()?;
+            if self.inner.data[self.i].label_src.exists() {
+                let label = self.inner.data[self.i].load_label()?;
                 if label.0.iter().any(|bb| classes.contains(&bb.class_num())) {
                     break;
                 }
@@ -417,7 +451,7 @@ impl<D: BoundrsDetection> Dataset<D> {
         Ok(())
     }
     fn go_to(&mut self, pos: usize) -> Result<()> {
-        self.i = pos.clamp(0, self.data.len() - 1);
+        self.i = pos.clamp(0, self.inner.data.len() - 1);
         Ok(())
     }
 
@@ -440,10 +474,10 @@ impl<D: BoundrsDetection> Dataset<D> {
     }
 
     pub fn current(&self) -> &LabelOnDisk<D> {
-        &self.data[self.i]
+        &self.inner.data[self.i]
     }
 
     pub fn iter_data(&self) -> impl Iterator<Item = &LabelOnDisk<D>> {
-        self.data.iter()
+        self.inner.data.iter()
     }
 }
