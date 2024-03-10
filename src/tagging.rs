@@ -178,7 +178,7 @@ impl<D: BoundrsDetection> Tool<D> for Tagging {
         if central_panel.input_mut(|i| {
             i.consume_shortcut(&KeyboardShortcut {
                 modifiers: Modifiers::NONE,
-                key: Key::R,
+                logical_key: Key::R,
             })
         }) {
             self.repeat_tags()

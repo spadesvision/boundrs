@@ -115,7 +115,7 @@ impl<D: BoundrsDetection> Labeling<D> {
     }
     fn draw_pose(&self, pose: &[Pos2], color: Color32, painter: &Painter) {
         for center in pose {
-            painter.circle_filled(*center, 5.0, color)
+            painter.circle_filled(*center, 5.0, color);
         }
     }
     fn draw_bbs(&self, ui: &mut Ui, img_rect: Rect) {
@@ -407,7 +407,7 @@ impl<D: BoundrsDetection> Tool<D> for Labeling<D> {
             if central_panel.input_mut(|i| {
                 i.consume_shortcut(&KeyboardShortcut {
                     modifiers: Modifiers::CTRL,
-                    key: Key::D,
+                    logical_key: Key::D,
                 })
             }) {
                 self.repeat_mode = false;

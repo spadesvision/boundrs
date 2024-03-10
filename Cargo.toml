@@ -6,15 +6,18 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-egui = { version = "0.24", features = ["serde"] }
-eframe = { version = "0.24"}
-egui_extras = { version = "*", features = ["all_loaders"] }
-image = { version = "0.24", features = ["jpeg", "png"], default_features = false }
+egui = "0.26"
+eframe = { version = "0.26", default-features = false, features = [
+    "default_fonts", # Embed the default egui fonts.
+    "glow",          # Use the glow rendering backend. Alternative: "wgpu".
+    "persistence",   # Enable restoring app state when restarting the app.
+] }
+egui_extras = { version = "0.26", features = ["all_loaders"] }
+image = { version = "0.*", features = ["jpeg", "png"], default_features = false }
 # Add the types you want support forpalette = "*"
 alphanumeric-sort = "*"
 glob = "*"
 anyhow = "*"
-lazy_static = "1.4.0"
 serde = { version = "*", features = ["derive"] }
 toml = "*"
 clap = { version = "4.1.8", features = ["derive"] }
@@ -25,8 +28,9 @@ linfa-clustering = "0.7.0"
 linfa = "0.7.0"
 ndarray = "0.15.6"
 env_logger = "0.11.1"
-bje_detections = { version = "0.1.0", path = "../bjrs/bje_detections" }
-bje_datasets = { version = "0.1.0", path = "../bjrs/bje_datasets" }
+bje_datasets = { git = "ssh://git@github.com/spadesvision/bjrs.git", branch = "main" }
+bje_detections = { git = "ssh://git@github.com/spadesvision/bjrs.git", branch = "main" }
+# bje_datasets = { version = "0.1.0", path = "../bjrs/bje_datasets" }
 
 [profile.release]
 debug = true
