@@ -1,5 +1,5 @@
 use anyhow::Result;
-use bje_detections::Detections;
+use sv_detections::Detections;
 use egui::*;
 use std::{
     collections::{HashMap, HashSet},
@@ -133,11 +133,11 @@ impl<D: BoundrsDetection> Conflicts<D> {
     fn label_differences(&self) -> Vec<(String, i32)> {
         let mut diff_counts: HashMap<_, i32> = HashMap::new();
         for bbox in &self.gt_label {
-            let name = bbox.class(&self.gt_config).name[0..1].to_owned();
+            let name = bbox.label(&self.gt_config).name[0..1].to_owned();
             *diff_counts.entry(name).or_default() += 1;
         }
         for bbox in &self.current_label {
-            let name = bbox.class(self.get_current_config()).name[0..1].to_owned();
+            let name = bbox.label(self.get_current_config()).name[0..1].to_owned();
             *diff_counts.entry(name).or_default() -= 1;
         }
         let mut diffs: Vec<_> = diff_counts.into_iter().filter(|(_, v)| *v != 0).collect();
@@ -215,28 +215,39 @@ impl<D: BoundrsDetection> Conflicts<D> {
             if self
                 .label_diffs
                 .iter()
-                .any(|(label, _)| label == &bb.class(self.get_current_config()).name[0..1])
+                .any(|(label, _)| label == &bb.label(self.get_current_config()).name[0..1])
             {
                 let color = Color32::WHITE;
                 let screen_rect = bb.to_screen_rect(img_rect);
-                painter.rect_stroke(screen_rect, Rounding::ZERO, Stroke::new(5.0, color));
+                painter.rect_stroke(
+                    screen_rect,
+                    CornerRadius::ZERO,
+                    Stroke::new(5.0, color),
+                    StrokeKind::Middle,
+                );
                 let text_pos = screen_rect.left_bottom();
-                self.draw_label_text(painter, text_pos, &bb.class(config));
+                self.draw_label_text(painter, text_pos, &bb.label(config));
             } else {
-                let color = bb.class(config).color;
+                let color = bb.label(config).color;
                 let screen_rect = bb.to_screen_rect(img_rect);
-                painter.rect_stroke(screen_rect, Rounding::ZERO, Stroke::new(2.0, color));
+                painter.rect_stroke(
+                    screen_rect,
+                    CornerRadius::ZERO,
+                    Stroke::new(2.0, color),
+                    StrokeKind::Middle,
+                );
                 let text_pos = screen_rect.left_bottom();
-                self.draw_label_text(painter, text_pos, &bb.class(config));
+                self.draw_label_text(painter, text_pos, &bb.label(config));
             }
         }
     }
     fn draw_label_text(&self, painter: &Painter, text_pos: Pos2, class: &DynLabel) {
         painter.rect(
             Rect::from_two_pos(text_pos, text_pos + [40.0, -35.0].into()),
-            Rounding::ZERO,
+            CornerRadius::ZERO,
             class.color,
             Stroke::NONE,
+            StrokeKind::Middle,
         );
         let text = &class.name;
         let _text_rect = painter.text(

@@ -1,4 +1,4 @@
-use bje_detections::{BBoxCardPose, YoloBBox};
+use sv_detections::{BBoxCardPose, YoloBBox};
 use boundrs::file_loader::{BlockingFileLoader, ImageCrateLoader};
 use boundrs::shady::ShadyFinder;
 use boundrs::Tool;
@@ -49,6 +49,10 @@ struct DiffsArgs {
     #[arg(long, default_value = "./labels_52.toml")]
     config_relabel: PathBuf,
 
+    /// Directory containing label .txt files. Defaults to `data_dir`.
+    #[arg(long)]
+    labels_dir: Option<PathBuf>,
+
     data_dir: PathBuf,
 }
 
@@ -60,11 +64,16 @@ enum DataFormat {
 
 #[derive(Parser, Debug)]
 struct LabelArgs {
-    #[arg(short, long, value_enum, default_value_t = DataFormat::YoloBBox)]
+    #[arg(long, value_enum, default_value_t = DataFormat::YoloBBox)]
     data_format: DataFormat,
 
+    /// Directory containing images (.jpg/.jpeg/.png).
     #[arg(short, long)]
     data_dir: PathBuf,
+
+    /// Directory containing label .txt files. Defaults to `data_dir` (labels next to images).
+    #[arg(short, long)]
+    labels_dir: Option<PathBuf>,
 
     #[arg(long, default_value = "")]
     prefix: String,
@@ -85,7 +94,7 @@ struct LabelArgs {
     start: Option<usize>,
 }
 
-type AppBuilder = Box<dyn FnOnce(&CreationContext<'_>) -> Box<dyn eframe::App>>;
+type AppBuilder = eframe::AppCreator<'static>;
 
 fn main() {
     env_logger::init();
@@ -93,8 +102,10 @@ fn main() {
 
     match args.command {
         Command::Diffs(args) => {
+            let labels_dir = args.labels_dir.clone().unwrap_or_else(|| args.data_dir.clone());
             check_differences(
                 args.data_dir,
+                labels_dir,
                 &args.prefix,
                 &args.prefix_relabel,
                 args.config,
@@ -109,11 +120,10 @@ fn main() {
 
             let app_builder: AppBuilder = match args.data_format {
                 DataFormat::YoloBBox => Box::new(|cc: &CreationContext<'_>| {
-                    Box::new(BoundrsV2::<YoloBBox>::new(cc, args)) as Box<dyn eframe::App + 'static>
+                    Ok(Box::new(BoundrsV2::<YoloBBox>::new(cc, args)) as Box<dyn eframe::App>)
                 }),
                 DataFormat::BBoxCardPose => Box::new(|cc: &CreationContext<'_>| {
-                    Box::new(BoundrsV2::<BBoxCardPose>::new(cc, args))
-                        as Box<dyn eframe::App + 'static>
+                    Ok(Box::new(BoundrsV2::<BBoxCardPose>::new(cc, args)) as Box<dyn eframe::App>)
                 }),
             };
             eframe::run_native("eframe template", options, app_builder).unwrap();
@@ -201,7 +211,10 @@ impl<D: BoundrsDetection + 'static> BoundrsV2<D> {
             image_loading_spinners: false,
             ..Default::default()
         });
-        let mut dataset = BoundrsDataset::with_prefix(&args.data_dir, &args.prefix).unwrap();
+        let labels_dir = args.labels_dir.clone().unwrap_or_else(|| args.data_dir.clone());
+        let mut dataset =
+            BoundrsDataset::with_prefix_in_dirs(&args.data_dir, &labels_dir, &args.prefix)
+                .unwrap();
         if let Some(start) = args.start {
             dataset.go(DatasetMovement::JumpTo(start), None).unwrap();
         }
@@ -270,7 +283,9 @@ impl<D: BoundrsDetection + 'static> BoundrsV2<D> {
 }
 
 impl<D: BoundrsDetection + 'static> eframe::App for BoundrsV2<D> {
-    fn update(&mut self, ctx: &Context, _frame: &mut eframe::Frame) {
+    fn ui(&mut self, ui: &mut Ui, _frame: &mut eframe::Frame) {
+        let ctx = ui.ctx().clone();
+
         // Handle global shortcuts
         if ctx.input_mut(|i| i.consume_key(Modifiers::CTRL, Key::Space)) {
             let current = self.dataset.current();
@@ -287,7 +302,7 @@ impl<D: BoundrsDetection + 'static> eframe::App for BoundrsV2<D> {
         }
 
         // draw own ui
-        let res = egui::Window::new("Boundrs").show(ctx, |ui| {
+        let res = egui::Window::new("Boundrs").show(&ctx, |ui| {
             self.draw_top_ui(ui);
             ui.separator();
             // draw tool ui
@@ -314,8 +329,8 @@ impl<D: BoundrsDetection + 'static> eframe::App for BoundrsV2<D> {
 
         // draw central panel with image
         egui::CentralPanel::default()
-            .frame(egui::Frame::none().fill(Color32::BLACK))
-            .show(ctx, |ui| {
+            .frame(egui::Frame::NONE.fill(Color32::BLACK))
+            .show_inside(ui, |ui| {
                 let img =
                     egui::Image::new(self.dataset.current_img_uri()).sense(Sense::click_and_drag());
                 let response = ui.add(img);

@@ -1,5 +1,5 @@
 use anyhow::Result;
-use bje_detections::Detections;
+use sv_detections::Detections;
 use egui::{Key, *};
 use std::collections::HashSet;
 
@@ -123,11 +123,16 @@ impl<D: BoundrsDetection> Labeling<D> {
         let painter = ui.painter();
         // let size = self.img_rect.size();
         for bb in &self.current_label {
-            let color = bb.class(&self.label_config).color;
+            let color = bb.label(&self.label_config).color;
             let screen_rect = bb.to_screen_rect(img_rect);
-            painter.rect_stroke(screen_rect, Rounding::ZERO, Stroke::new(2.0, color));
+            painter.rect_stroke(
+                screen_rect,
+                CornerRadius::ZERO,
+                Stroke::new(2.0, color),
+                StrokeKind::Middle,
+            );
             let text_pos = screen_rect.left_bottom();
-            self.draw_label_text(painter, text_pos, &bb.class(&self.label_config));
+            self.draw_label_text(painter, text_pos, &bb.label(&self.label_config));
 
             if let Some(pose) = bb.pose(img_rect) {
                 self.draw_pose(&pose, color, painter)
@@ -153,9 +158,10 @@ impl<D: BoundrsDetection> Labeling<D> {
     fn draw_label_text(&self, painter: &Painter, text_pos: Pos2, class: &DynLabel) {
         painter.rect(
             Rect::from_two_pos(text_pos, text_pos + [40.0, -35.0].into()),
-            Rounding::ZERO,
+            CornerRadius::ZERO,
             class.color,
             Stroke::NONE,
+            StrokeKind::Middle,
         );
         let text = if self.repeat_mode {
             "Repeat region"
@@ -193,7 +199,7 @@ impl<D: BoundrsDetection> Labeling<D> {
                 BBoxInput::Partial(screen_pos)
             }
             BBoxInput::None => BBoxInput::None,
-            BBoxInput::Partial(pos1) if img_response.drag_released() => {
+            BBoxInput::Partial(pos1) if img_response.drag_stopped() => {
                 let pos2 = img_response.interact_pointer_pos().unwrap();
                 // sometimes you drag a tiny amount without wanting to
                 if (pos2.x - pos1.x).abs() < 20.0 || (pos2.y - pos1.y).abs() < 20.0 {

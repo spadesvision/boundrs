@@ -1,5 +1,5 @@
 use anyhow::Result;
-use bje_detections::{Card, Detection, Detections, YoloBBox};
+use sv_detections::{Card, Detection, Detections, YoloBBox};
 use itertools::Itertools;
 use log::{info, warn};
 
@@ -125,7 +125,7 @@ struct MultipleLabels {
 use linfa::dataset::{DatasetBase, Labels};
 use linfa::traits::*;
 use linfa_clustering::Dbscan;
-use ndarray::arr2;
+use ndarray::{arr2, Array1};
 
 impl MultipleLabels {
     fn to_centroids(&self) -> impl Iterator<Item = [f32; 2]> + '_ {
@@ -138,7 +138,8 @@ impl MultipleLabels {
         let min_points = 2;
         let centroids = self.to_centroids();
         let data = arr2(&centroids.collect_vec());
-        let data = DatasetBase::from(data);
+        let n = data.nrows();
+        let data = DatasetBase::new(data, Array1::<()>::default(n));
         let clusters = Dbscan::params(min_points)
             .tolerance(0.002)
             .transform(data)

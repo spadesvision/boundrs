@@ -1,5 +1,5 @@
 use anyhow::Result;
-use bje_datasets::{Datapoint, Dataset};
+use sv_datasets::{Datapoint, Dataset};
 use egui::*;
 use log::{info, warn};
 use serde::Deserialize;
@@ -8,7 +8,9 @@ use std::fs::File;
 use std::marker::PhantomData;
 use std::path::{Path, PathBuf};
 
-use bje_detections::{BBoxCardPose, Card, Degree, Detection, Detections, YoloBBox, YoloOBB};
+use sv_detections::{
+    BBoxCardPose, Card, Degree, Detection, Detections, SerializableDetection, YoloBBox, YoloOBB,
+};
 
 #[derive(Deserialize, Clone)]
 pub struct DynLabelSpec {
@@ -101,8 +103,8 @@ pub struct DynLabel {
     pub keys: HashSet<Key>,
 }
 
-pub trait BoundrsDetection: Detection {
-    fn class(&self, config: &DynLabelConfig) -> DynLabel;
+pub trait BoundrsDetection: Detection + SerializableDetection {
+    fn label(&self, config: &DynLabelConfig) -> DynLabel;
     fn class_num(&self) -> usize;
     fn to_screen_rect(self, img_rect: Rect) -> Rect;
     fn is_close(&self, other: &Self, threshold: f32) -> bool;
@@ -136,7 +138,7 @@ impl BoundrsDetection for YoloBBox {
         );
         rect.translate(img_rect.left_top().to_vec2())
     }
-    fn class(&self, config: &DynLabelConfig) -> DynLabel {
+    fn label(&self, config: &DynLabelConfig) -> DynLabel {
         // TODO improve error handling, or even better, encode in type system
         config
             .label_from_usize(self.class.to_usize())
@@ -168,7 +170,8 @@ impl BoundrsDetection for YoloBBox {
             y: y.clamp(0.0, 1.0),
             w,
             h,
-            confidence: 1.0,
+            conf_value: 1.0,
+            conf_suit: 1.0,
         }
     }
 
@@ -198,9 +201,9 @@ impl BoundrsDetection for BBoxCardPose {
         let bbox = self.to_bbox();
         bbox.to_screen_rect(img_rect)
     }
-    fn class(&self, config: &DynLabelConfig) -> DynLabel {
+    fn label(&self, config: &DynLabelConfig) -> DynLabel {
         let bbox = self.to_bbox();
-        bbox.class(config)
+        bbox.label(config)
     }
     fn from_rect(rect: Rect, img_rect: Rect, class: &DynLabel) -> Self {
         let bbox = YoloBBox::from_rect(rect, img_rect, class);
@@ -211,7 +214,8 @@ impl BoundrsDetection for BBoxCardPose {
             w: bbox.w,
             h: bbox.h,
             degree: Degree(0.0),
-            confidence: bbox.confidence,
+            conf_value: bbox.conf_value,
+            conf_suit: bbox.conf_suit,
         };
         obb.into()
     }
@@ -236,14 +240,14 @@ impl BoundrsDetection for BBoxCardPose {
 }
 
 #[derive(Debug, Clone)]
-pub struct LabelOnDisk<D: Detection> {
+pub struct LabelOnDisk<D: SerializableDetection> {
     img_src: PathBuf,
     label_src: PathBuf,
     detections: PhantomData<D>,
 }
 
 fn load_image_from_path(path: &std::path::Path) -> Result<ColorImage> {
-    let image = image::io::Reader::open(path)?.decode()?;
+    let image = image::ImageReader::open(path)?.decode()?;
     let size = [image.width() as _, image.height() as _];
     let image_buffer = image.to_rgba8();
     let pixels = image_buffer.as_flat_samples();
@@ -353,8 +357,62 @@ pub struct BoundrsDataset<D: BoundrsDetection> {
 }
 
 impl<D: BoundrsDetection> BoundrsDataset<D> {
-    pub fn from_input_dir(labels_dir: &Path) -> Result<Self> {
-        let inner: Dataset<LabelOnDisk<D>> = Dataset::from_directory(labels_dir)?;
+    pub fn from_input_dir(data_dir: &Path) -> Result<Self> {
+        Self::with_prefix_in_dirs(data_dir, data_dir, "")
+    }
+    pub fn with_prefix(data_dir: &Path, prefix: &str) -> Result<Self> {
+        Self::with_prefix_in_dirs(data_dir, data_dir, prefix)
+    }
+    pub fn with_prefix_in_dirs(
+        images_dir: &Path,
+        labels_dir: &Path,
+        prefix: &str,
+    ) -> Result<Self> {
+        if !images_dir.exists() {
+            return Err(anyhow::anyhow!(
+                "images directory {images_dir:?} does not exist"
+            ));
+        }
+        if !labels_dir.exists() {
+            std::fs::create_dir_all(labels_dir)?;
+        }
+
+        let mut image_paths: Vec<PathBuf> = std::fs::read_dir(images_dir)?
+            .filter_map(|e| e.ok().map(|e| e.path()))
+            .filter(|p| {
+                p.extension()
+                    .is_some_and(|e| e == "jpg" || e == "jpeg" || e == "png")
+            })
+            .collect();
+        image_paths.sort_by(|a, b| {
+            a.file_stem()
+                .unwrap_or_default()
+                .cmp(b.file_stem().unwrap_or_default())
+        });
+
+        let data: Vec<LabelOnDisk<D>> = image_paths
+            .into_iter()
+            .map(|img_src| {
+                let stem = img_src
+                    .file_stem()
+                    .expect("image path should have a stem")
+                    .to_string_lossy();
+                let label_src = labels_dir.join(format!("{prefix}{stem}.txt"));
+                LabelOnDisk {
+                    img_src,
+                    label_src,
+                    detections: PhantomData,
+                }
+            })
+            .collect();
+
+        if data.is_empty() {
+            return Err(anyhow::anyhow!(
+                "no images (.jpg/.jpeg/.png) found in {images_dir:?}"
+            ));
+        }
+
+        let inner = Dataset { data };
         let first_no_label = inner
             .data
             .iter()
@@ -365,20 +423,6 @@ impl<D: BoundrsDetection> BoundrsDataset<D> {
             inner,
             i: first_no_label,
         })
-    }
-    pub fn with_prefix(labels_dir: &Path, prefix: &str) -> Result<Self> {
-        let mut dataset = BoundrsDataset::from_input_dir(labels_dir)?;
-        for datapoint in &mut dataset.inner.data {
-            let label_name = datapoint
-                .label_src
-                .file_name()
-                .expect(".txt path should be a file")
-                .to_str()
-                .expect(".txt filename should be a &str");
-            let label_prefix_name = format!("{prefix}{label_name}");
-            datapoint.label_src = datapoint.label_src.with_file_name(label_prefix_name);
-        }
-        Ok(dataset)
     }
 
     pub fn current_image(&self) -> Result<ColorImage> {

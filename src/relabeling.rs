@@ -1,5 +1,5 @@
 use anyhow::Result;
-use bje_detections::Detections;
+use sv_detections::Detections;
 use egui::*;
 use log::{error, info};
 
@@ -58,9 +58,10 @@ impl<D: BoundrsDetection> Relabeling<D> {
     fn draw_label_text(&self, painter: &Painter, text_pos: Pos2, class: DynLabel) {
         painter.rect(
             Rect::from_two_pos(text_pos, text_pos + [40.0, -35.0].into()),
-            Rounding::ZERO,
+            CornerRadius::ZERO,
             class.color,
             Stroke::NONE,
+            StrokeKind::Middle,
         );
         let _text_rect = painter.text(
             text_pos,
@@ -73,18 +74,28 @@ impl<D: BoundrsDetection> Relabeling<D> {
     fn draw_bbs(&self, ui: &mut Ui, img_rect: Rect) {
         let painter = ui.painter();
         for bb in self.old_label.iter() {
-            let color = bb.class(&self.old_config).color;
+            let color = bb.label(&self.old_config).color;
             let screen_rect = bb.to_screen_rect(img_rect);
-            painter.rect_stroke(screen_rect, Rounding::ZERO, Stroke::new(2.0, color));
+            painter.rect_stroke(
+                screen_rect,
+                CornerRadius::ZERO,
+                Stroke::new(2.0, color),
+                StrokeKind::Middle,
+            );
             let text_pos = screen_rect.left_bottom();
-            self.draw_label_text(painter, text_pos, bb.class(&self.old_config));
+            self.draw_label_text(painter, text_pos, bb.label(&self.old_config));
         }
         for bb in self.new_label.iter() {
-            let color = bb.class(&self.new_config).color;
+            let color = bb.label(&self.new_config).color;
             let screen_rect = bb.to_screen_rect(img_rect);
-            painter.rect_stroke(screen_rect, Rounding::ZERO, Stroke::new(2.0, color));
+            painter.rect_stroke(
+                screen_rect,
+                CornerRadius::ZERO,
+                Stroke::new(2.0, color),
+                StrokeKind::Middle,
+            );
             let text_pos = screen_rect.left_top();
-            self.draw_label_text(painter, text_pos, bb.class(&self.new_config));
+            self.draw_label_text(painter, text_pos, bb.label(&self.new_config));
         }
     }
     fn find_next_highlighted(&mut self) -> Option<usize> {
@@ -115,8 +126,9 @@ impl<D: BoundrsDetection> Relabeling<D> {
             let screen_rect = bb.to_screen_rect(img_rect);
             ui.painter().rect_stroke(
                 screen_rect,
-                Rounding::ZERO,
+                CornerRadius::ZERO,
                 Stroke::new(8.0, Color32::WHITE),
+                StrokeKind::Middle,
             );
         }
     }
@@ -177,11 +189,11 @@ impl<D: BoundrsDetection> Relabeling<D> {
             (self.new_class_pressed(ui), self.highlighted)
         {
             let old_bbx = self.old_label.0[highlighted];
-            // let class = old_bbx.class(&self.old_config);
+            // let class = old_bbx.label(&self.old_config);
             // let card = Card::from_usize(class.0);
             let new_class = self
                 .new_config
-                .label_from_usize(suit_usize * 13 + old_bbx.class(&self.old_config).i % 13)
+                .label_from_usize(suit_usize * 13 + old_bbx.label(&self.old_config).i % 13)
                 .expect("Remap issue, usize to high");
             // let new_class = CardSuit(card, suit);
             let new_bbs = D::from_rect(old_bbx.to_screen_rect(img_rect), img_rect, &new_class);
@@ -216,7 +228,7 @@ impl<D: BoundrsDetection> Relabeling<D> {
                 // TODO generalize, probably from config
                 if iou > self.repeat_iou && old_bbs.class_num() == new_bbs.class_num() % 13 {
                     let new_label =
-                        D::from_rect(old_rect, img_rect, &new_bbs.class(&self.new_config));
+                        D::from_rect(old_rect, img_rect, &new_bbs.label(&self.new_config));
                     self.new_label.0.push(new_label);
                     break;
                 }

@@ -168,7 +168,7 @@ impl ImageLoader for ImageCrateLoader {
                 // cache.insert(uri.into(), result.clone());
                 match result {
                     Ok(image) => Ok(ImagePoll::Ready { image }),
-                    Err(err) => Err(LoadError::Loading(err)),
+                    Err(err) => Err(err),
                 }
             }
             Ok(BytesPoll::Pending { size }) => Ok(ImagePoll::Pending { size }),
@@ -237,8 +237,6 @@ impl TextureLoader for BoundrsTextureLoader {
 
         // self.cache.lock().clear();
     }
-
-    fn end_frame(&self, _: usize) {}
 
     fn byte_size(&self) -> usize {
         0

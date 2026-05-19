@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 
 use crate::dataset::{BoundrsDataset, BoundrsDetection, DynLabelConfig};
-use bje_detections::{Detections, YoloBBox};
+use sv_detections::{Detections, YoloBBox};
 use itertools::iproduct;
 
 // use crate::dataset::{YoloBBox, YoloLabel};
@@ -49,31 +49,33 @@ impl<'a, 'b> LabelDiff<'a, 'b> {
     pub fn summary(&self, a_config: &DynLabelConfig, b_config: &DynLabelConfig) -> String {
         let only_a = self
             .only_in_a()
-            .map(|bb| bb.class(a_config).name)
+            .map(|bb| bb.label(a_config).name)
             .collect::<Vec<String>>()
             .join(",");
         let only_b = self
             .only_in_b()
-            .map(|bb| bb.class(b_config).name)
+            .map(|bb| bb.label(b_config).name)
             .collect::<Vec<String>>()
             .join(",");
         let diffs = self
             .class_differences_itersection()
-            .map(|(a, b)| format!("{} != {}", a.class(a_config).name, b.class(b_config).name))
+            .map(|(a, b)| format!("{} != {}", a.label(a_config).name, b.label(b_config).name))
             .collect::<Vec<String>>()
             .join(",");
         format!("only a {only_a}; only b {only_b}; diffs {diffs}")
     }
 }
 pub fn check_differences(
-    path: PathBuf,
+    images_dir: PathBuf,
+    labels_dir: PathBuf,
     prefix: &str,
     prefix_relabel: &str,
     config: PathBuf,
     config_relabel: PathBuf,
 ) -> anyhow::Result<()> {
-    let dataset = BoundrsDataset::with_prefix(&path, prefix)?;
-    let relabel_dataset = BoundrsDataset::with_prefix(&path, prefix_relabel)?;
+    let dataset = BoundrsDataset::with_prefix_in_dirs(&images_dir, &labels_dir, prefix)?;
+    let relabel_dataset =
+        BoundrsDataset::with_prefix_in_dirs(&images_dir, &labels_dir, prefix_relabel)?;
     let config = DynLabelConfig::load_from_file(config)?;
     let config_relabel = DynLabelConfig::load_from_file(config_relabel)?;
 
